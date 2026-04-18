@@ -1,9 +1,9 @@
-name: Package and Release
+name: Package and Release to CurseForge
 
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
 
 jobs:
   release:
@@ -14,10 +14,28 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Get version from TOC
+        id: version
+        run: |
+          VERSION=$(grep -oP '## Version: \K.*' BRutus.toc | tr -d '[:space:]')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create version tag
+        if: steps.version.outputs.exists == 'false' && steps.version.outputs.version != '' && !contains(steps.version.outputs.version, 'project-version')
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git tag -a "v${{ steps.version.outputs.version }}" -m "Release v${{ steps.version.outputs.version }}"
+          git push origin "v${{ steps.version.outputs.version }}"
+
       - name: Package and Release
         uses: BigWigsMods/packager@v2
         with:
           args: -g bcc
         env:
           CF_API_KEY: ${{ secrets.CF_API_KEY }}
-          GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
