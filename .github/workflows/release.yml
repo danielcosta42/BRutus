@@ -1,39 +1,90 @@
-name: Package and Release to CurseForge
+name: Lint, Version & Release
 
 on:
   push:
     branches:
       - main
+  pull_request:
+    branches:
+      - main
 
 jobs:
-  release:
+  lint:
+    name: Luacheck
     runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Luacheck
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq lua5.1 luarocks > /dev/null
+          sudo luarocks install luacheck > /dev/null
+
+      - name: Run Luacheck
+        run: luacheck . --config .luacheckrc
+
+  release:
+    name: Version & Release
+    needs: lint
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Get version from TOC
+      - name: Compute next version
         id: version
         run: |
-          VERSION=$(grep -oP '## Version: \K.*' BRutus.toc | tr -d '[:space:]')
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
+          # Get latest semver tag, default to 0.0.0 if none
+          LATEST=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+          if [ -z "$LATEST" ]; then
+            LATEST="v0.0.0"
+          fi
+          echo "Latest tag: $LATEST"
+
+          # Strip 'v' prefix and split
+          CURRENT="${LATEST#v}"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+
+          # Determine bump from commit messages since last tag
+          COMMITS=$(git log "$LATEST"..HEAD --pretty=format:"%s" 2>/dev/null || git log --pretty=format:"%s")
+
+          if echo "$COMMITS" | grep -qiE "^(feat|feature)(\(.+\))?!:|BREAKING CHANGE"; then
+            MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0
+          elif echo "$COMMITS" | grep -qiE "^(feat|feature)(\(.+\))?:"; then
+            MINOR=$((MINOR + 1)); PATCH=0
           else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
+            PATCH=$((PATCH + 1))
           fi
 
-      - name: Create version tag
-        if: steps.version.outputs.exists == 'false' && steps.version.outputs.version != '' && !contains(steps.version.outputs.version, 'project-version')
-        run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          git tag -a "v${{ steps.version.outputs.version }}" -m "Release v${{ steps.version.outputs.version }}"
-          git push origin "v${{ steps.version.outputs.version }}"
+          NEXT="${MAJOR}.${MINOR}.${PATCH}"
+          echo "Next version: $NEXT"
+          echo "next=$NEXT" >> "$GITHUB_OUTPUT"
 
-      - name: Package and Release
+      - name: Update TOC version
+        run: sed -i "s/^## Version: .*/## Version: ${{ steps.version.outputs.next }}/" BRutus.toc
+
+      - name: Commit version bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add BRutus.toc
+          git diff --cached --quiet && echo "No changes" && exit 0
+          git commit -m "chore: bump version to ${{ steps.version.outputs.next }} [skip ci]"
+          git push origin main
+
+      - name: Create and push tag
+        run: |
+          git tag -a "v${{ steps.version.outputs.next }}" -m "Release v${{ steps.version.outputs.next }}"
+          git push origin "v${{ steps.version.outputs.next }}"
+
+      - name: Package and publish to CurseForge
         uses: BigWigsMods/packager@v2
         with:
           args: -g bcc
