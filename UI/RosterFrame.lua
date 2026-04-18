@@ -939,8 +939,8 @@ end
 -- Recruitment Panel UI
 ----------------------------------------------------------------------
 function BRutus:CreateRecruitmentPanel(parent, _mainFrame)
-    local UI = BRutus.UI  -- luacheck: ignore 421
-    local C = BRutus.Colors  -- luacheck: ignore 421
+    local UI = BRutus.UI  -- luacheck: ignore 411
+    local C = BRutus.Colors  -- luacheck: ignore 411
     local yOff = -15
 
     -- Helper to create a labeled section
