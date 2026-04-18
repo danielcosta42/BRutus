@@ -1,4 +1,4 @@
-name: Lint, Version & Release
+name: Lint & Version
 
 on:
   push:
@@ -84,16 +84,3 @@ jobs:
         run: |
           git tag -a "v${{ steps.version.outputs.next }}" -m "Release v${{ steps.version.outputs.next }}"
           git push origin "v${{ steps.version.outputs.next }}"
-
-      - name: Re-checkout tagged commit
-        uses: actions/checkout@v4
-        with:
-          ref: v${{ steps.version.outputs.next }}
-          fetch-depth: 0
-
-      - name: Package and publish to CurseForge
-        uses: BigWigsMods/packager@v2
-        with:
-          args: -g bcc
-        env:
-          CF_API_KEY: ${{ secrets.CF_API_KEY }}
