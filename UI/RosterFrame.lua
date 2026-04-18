@@ -658,7 +658,7 @@ function BRutus.CreateRosterFrame()
 
         for key, btn in pairs(self.headerButtons) do
             if key == sortBy then
-                btn.sortArrow:SetText(sortAsc and "▲" or "▼")
+                btn.sortArrow:SetText(sortAsc and "|TInterface\\BUTTONS\\Arrow-Up-Up:12:12|t" or "|TInterface\\BUTTONS\\Arrow-Down-Up:12:12|t")
                 btn.sortArrow:Show()
             else
                 btn.sortArrow:Hide()
@@ -951,14 +951,14 @@ function UpdateRosterRow(row, data, rowIndex)
     row.classText:SetTextColor(textColor(cr, cg, cb))
 
     -- Race
-    row.raceText:SetText(data.race ~= "" and data.race or "—")
+    row.raceText:SetText(data.race ~= "" and data.race or "-")
     row.raceText:SetTextColor(textColor(C.silver.r, C.silver.g, C.silver.b))
 
     -- Average iLvl
     if data.avgIlvl and data.avgIlvl > 0 then
         row.ilvlText:SetText(BRutus:FormatItemLevel(data.avgIlvl))
     else
-        row.ilvlText:SetText("|cff666666—|r")
+        row.ilvlText:SetText("|cff666666-|r")
     end
 
     -- Professions
@@ -997,7 +997,7 @@ function UpdateRosterRow(row, data, rowIndex)
             row.attPctText:SetTextColor(ar, ag, ab)
             row.attPctText:SetText(pct .. "%")
         else
-            row.attPctText:SetText("|cff666666—|r")
+            row.attPctText:SetText("|cff666666-|r")
         end
     else
         row.attPctText:SetText("")
@@ -1009,7 +1009,7 @@ function UpdateRosterRow(row, data, rowIndex)
     elseif data.lastUpdate > 0 then
         row.lastSeenText:SetText(BRutus:TimeAgo(data.lastUpdate))
     else
-        row.lastSeenText:SetText("—")
+        row.lastSeenText:SetText("-")
     end
 end
 
@@ -1849,7 +1849,7 @@ function BRutus:CreateTMBPanel(parent, _mainFrame)
             local timeStr = BRutus:TimeAgo(tmb.lastImport)
             local charTotal = 0
             for _ in pairs(tmb.data or {}) do charTotal = charTotal + 1 end
-            tmbStatusText:SetText(string.format("|cff4CFF4CLoaded|r  |cffAAAAAA—|r  %d characters  |cffAAAAAA—|r  %s by %s",
+            tmbStatusText:SetText(string.format("|cff4CFF4CLoaded|r  |cffAAAAAA-|r  %d characters  |cffAAAAAA-|r  %s by %s",
                 charTotal, timeStr, tmb.importedBy or "unknown"))
         else
             tmbStatusText:SetText("|cffFF4444No TMB data imported|r")

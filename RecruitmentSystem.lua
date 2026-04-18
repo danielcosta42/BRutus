@@ -58,7 +58,7 @@ function Recruitment:Initialize()
     -- Set default welcome message if empty
     if r.welcomeMessage == "" then
         local guildName = GetGuildInfo("player") or "our guild"
-        r.welcomeMessage = "Welcome to " .. guildName .. "! Join our Discord: " .. r.discord .. " — Have fun!"
+         r.welcomeMessage = "Welcome to " .. guildName .. "! Join our Discord: " .. r.discord .. " - Have fun!"
     end
 
     -- Listen for new guild members joining
@@ -111,7 +111,7 @@ function Recruitment:StartAutoRecruit()
         self:ShowSendPopup()
     end)
 
-    BRutus:Print("Recruitment |cff4CFF4Cstarted|r — popup every " .. interval .. "s. Click to send!")
+     BRutus:Print("Recruitment |cff4CFF4Cstarted|r - popup every " .. interval .. "s. Click to send!")
     return true
 end
 
@@ -193,7 +193,7 @@ function Recruitment:CreatePopupFrame()
     local dText = dismiss:CreateFontString(nil, "OVERLAY")
     dText:SetFont("Fonts\\FRIZQT__.TTF", 14, "OUTLINE")
     dText:SetPoint("CENTER")
-    dText:SetText("×")
+    dText:SetText("x")
     dText:SetTextColor(0.6, 0.6, 0.6)
     dismiss:SetScript("OnEnter", function() dText:SetTextColor(1, 0.3, 0.3) end)
     dismiss:SetScript("OnLeave", function() dText:SetTextColor(0.6, 0.6, 0.6) end)
@@ -210,7 +210,7 @@ function Recruitment:CreatePopupFrame()
         GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
         GameTooltip:AddLine("BRutus Recruitment", C.gold.r, C.gold.g, C.gold.b)
         GameTooltip:AddLine("Left-click to post recruitment message.", 0.8, 0.8, 0.8, true)
-        GameTooltip:AddLine("Drag to move. × to dismiss.", 0.5, 0.5, 0.5, true)
+        GameTooltip:AddLine("Drag to move. x to dismiss.", 0.5, 0.5, 0.5, true)
         GameTooltip:Show()
     end)
     f:SetScript("OnLeave", function(self)

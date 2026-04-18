@@ -214,7 +214,7 @@ function PopulateDetail(frame, data)
     ----------------------------------------------------------------
     -- Section: Equipment
     ----------------------------------------------------------------
-    yOff = CreateSectionHeader(child, "EQUIPMENT" .. (data.avgIlvl and data.avgIlvl > 0 and ("  —  Avg iLvl: " .. data.avgIlvl) or ""), yOff, contentWidth)
+     yOff = CreateSectionHeader(child, "EQUIPMENT" .. (data.avgIlvl and data.avgIlvl > 0 and ("  -  Avg iLvl: " .. data.avgIlvl) or ""), yOff, contentWidth)
     yOff = yOff - 5
 
     if data.gear then
@@ -577,7 +577,7 @@ function CreateGearRow(parent, slotId, item, yOff, width)
         emptyText:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
         emptyText:SetPoint("TOPLEFT", 82, yOff - 5)
         emptyText:SetTextColor(0.3, 0.3, 0.3)
-        emptyText:SetText("— Empty —")
+         emptyText:SetText("- Empty -")
         emptyText:Show()
     end
 

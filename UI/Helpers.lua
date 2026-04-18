@@ -131,29 +131,27 @@ end
 -- Create close button (X)
 ----------------------------------------------------------------------
 function Helpers:CreateCloseButton(parent)
-    local btn = CreateFrame("Button", nil, parent)
-    btn:SetSize(24, 24)
-    btn:SetNormalTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Up")
-    btn:SetPushedTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Down")
-    btn:SetHighlightTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Highlight", "ADD")
+    local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
+    btn:SetSize(18, 18)
+    btn:SetBackdrop({
+        bgFile   = "Interface\\Buttons\\WHITE8x8",
+    })
+    btn:SetBackdropColor(0.6, 0.2, 0.2, 0.4)
 
-    -- Override with custom X
     local x = btn:CreateFontString(nil, "OVERLAY")
-    x:SetFont("Fonts\\FRIZQT__.TTF", 16, "OUTLINE")
+    x:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
     x:SetPoint("CENTER", 0, 0)
-    x:SetTextColor(C.silver.r, C.silver.g, C.silver.b)
-    x:SetText("×")
+    x:SetTextColor(0.8, 0.8, 0.8)
+    x:SetText("X")
     btn.x = x
 
-    btn:SetNormalTexture("")
-    btn:SetPushedTexture("")
-    btn:SetHighlightTexture("")
-
     btn:SetScript("OnEnter", function(self)
-        self.x:SetTextColor(C.red.r, C.red.g, C.red.b)
+        self:SetBackdropColor(0.8, 0.2, 0.2, 0.7)
+        self.x:SetTextColor(1, 1, 1)
     end)
     btn:SetScript("OnLeave", function(self)
-        self.x:SetTextColor(C.silver.r, C.silver.g, C.silver.b)
+        self:SetBackdropColor(0.6, 0.2, 0.2, 0.4)
+        self.x:SetTextColor(0.8, 0.8, 0.8)
     end)
 
     return btn
