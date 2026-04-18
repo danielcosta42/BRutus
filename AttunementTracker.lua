@@ -160,7 +160,7 @@ function AttunementTracker:Initialize()
     local frame = CreateFrame("Frame")
     frame:RegisterEvent("QUEST_TURNED_IN")
     frame:RegisterEvent("QUEST_LOG_UPDATE")
-    frame:SetScript("OnEvent", function(_, event, ...)
+    frame:SetScript("OnEvent", function(_, event)
         if event == "QUEST_TURNED_IN" then
             C_Timer.After(1, function() AttunementTracker:ScanAttunements() end)
         end
@@ -271,7 +271,7 @@ function AttunementTracker:GetAttunementSummary(playerKey)
 
     local label = done .. "/" .. total
     if done == total then
-        label = label .. " ✓"
+        label = label .. " OK"
     end
 
     return BRutus:ColorText(label, color.r, color.g, color.b)

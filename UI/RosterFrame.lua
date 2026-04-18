@@ -25,7 +25,6 @@ local FRAME_WIDTH = 880
 local FRAME_HEIGHT = HEADER_HEIGHT + (ROW_HEIGHT * VISIBLE_ROWS) + 150  -- extra space for tab bar
 
 local TAB_HEIGHT = 28
-local TAB_BAR_Y = -44  -- below title bar
 
 ----------------------------------------------------------------------
 -- Create the main roster frame
@@ -105,7 +104,7 @@ function BRutus.CreateRosterFrame()
     closeBtn:SetScript("OnClick", function() frame:Hide() end)
 
     -- Sync button
-    local syncBtn = UI:CreateButton(titleBar, "⟳ Sync", 70, 24)
+    local syncBtn = UI:CreateButton(titleBar, "Sync", 70, 24)
     syncBtn:SetPoint("RIGHT", closeBtn, "LEFT", -10, 0)
     syncBtn:SetFrameLevel(titleBar:GetFrameLevel() + 5)
     syncBtn:SetScript("OnClick", function()
@@ -214,8 +213,8 @@ function BRutus.CreateRosterFrame()
     end
 
     -- Create tabs
-    CreateTab("roster", "📋 Roster", false)
-    CreateTab("recruitment", "📢 Recruitment", true)
+    CreateTab("roster", "Roster", false)
+    CreateTab("recruitment", "Recruitment", true)
 
     ----------------------------------------------------------------
     -- ROSTER PANEL
@@ -287,7 +286,7 @@ function BRutus.CreateRosterFrame()
     searchPlaceholder:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
     searchPlaceholder:SetPoint("LEFT", 8, 0)
     searchPlaceholder:SetTextColor(0.4, 0.4, 0.4)
-    searchPlaceholder:SetText("🔍 Search...")
+    searchPlaceholder:SetText("Search...")
 
     searchBox:SetScript("OnTextChanged", function(self)
         local text = self:GetText()
@@ -316,7 +315,7 @@ function BRutus.CreateRosterFrame()
 
     local xOff = 10
     frame.headerButtons = {}
-    for i, col in ipairs(COLUMNS) do
+    for _, col in ipairs(COLUMNS) do
         if col.label ~= "" then
             local btn = CreateFrame("Button", nil, headerFrame)
             btn:SetSize(col.width, HEADER_HEIGHT)
@@ -645,7 +644,7 @@ function CreateRosterRow(parent, rowIndex)
     classIcon:SetPoint("LEFT", xOff, 0)
     classIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
     row.classIcon = classIcon
-    
+
     local nameText = row:CreateFontString(nil, "OVERLAY")
     nameText:SetFont("Fonts\\FRIZQT__.TTF", 12, "OUTLINE")
     nameText:SetPoint("LEFT", classIcon, "RIGHT", 5, 0)
@@ -919,7 +918,7 @@ function ShowRowTooltip(row)
             else
                 color = C.red
             end
-            local status = att.complete and "✓" or string.format("%d%%", att.progress * 100)
+            local status = att.complete and "|cff00ff00Done|r" or string.format("%d%%", att.progress * 100)
             GameTooltip:AddLine(string.format("  %s [%s]  %s", att.name, att.tier, status),
                 color.r, color.g, color.b)
         end
@@ -939,9 +938,9 @@ end
 ----------------------------------------------------------------------
 -- Recruitment Panel UI
 ----------------------------------------------------------------------
-function BRutus:CreateRecruitmentPanel(parent, mainFrame)
-    local UI = BRutus.UI
-    local C = BRutus.Colors
+function BRutus:CreateRecruitmentPanel(parent, _mainFrame)
+    local UI = BRutus.UI  -- luacheck: ignore 421
+    local C = BRutus.Colors  -- luacheck: ignore 421
     local yOff = -15
 
     -- Helper to create a labeled section
@@ -967,7 +966,7 @@ function BRutus:CreateRecruitmentPanel(parent, mainFrame)
     yOff = SectionHeader("Auto-Recruit Messages", yOff)
 
     -- Info note about Blizzard restriction
-    local infoNote = UI:CreateText(parent, "⚠ Blizzard requires a click to send channel messages. A popup will appear on interval.", 10, 0.7, 0.55, 0.2)
+    local infoNote = UI:CreateText(parent, "Note: Blizzard requires a click to send channel messages. A popup will appear on interval.", 10, 0.7, 0.55, 0.2)
     infoNote:SetPoint("TOPLEFT", 30, yOff)
     infoNote:SetWidth(700)
     yOff = yOff - 18
@@ -981,7 +980,7 @@ function BRutus:CreateRecruitmentPanel(parent, mainFrame)
     toggleBtn:SetPoint("TOPLEFT", 300, yOff + 3)
 
     -- Manual send button
-    local sendNowBtn = UI:CreateButton(parent, "📢 Send Now", 100, 22)
+    local sendNowBtn = UI:CreateButton(parent, "Send Now", 100, 22)
     sendNowBtn:SetPoint("TOPLEFT", 390, yOff + 3)
     sendNowBtn:SetScript("OnClick", function()
         if BRutus.Recruitment then

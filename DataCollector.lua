@@ -12,7 +12,7 @@ function DataCollector:Initialize()
     frame:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
     frame:RegisterEvent("SKILL_LINES_CHANGED")
     frame:RegisterEvent("CHAT_MSG_SKILL")
-    frame:SetScript("OnEvent", function(_, event, ...)
+    frame:SetScript("OnEvent", function(_, event)
         if event == "PLAYER_EQUIPMENT_CHANGED" then
             C_Timer.After(0.5, function() DataCollector:CollectMyData() end)
         elseif event == "SKILL_LINES_CHANGED" or event == "CHAT_MSG_SKILL" then
@@ -117,18 +117,9 @@ function DataCollector:CollectProfessions()
 
     -- Get primary professions
     local numSkills = GetNumSkillLines()
-    local isHeader = false
-    local currentHeader = ""
 
     for i = 1, numSkills do
         local skillName, isHeader_, _, skillRank, _, _, skillMaxRank = GetSkillLineInfo(i)
-
-        if isHeader_ then
-            isHeader = true
-            currentHeader = skillName
-        else
-            isHeader = false
-        end
 
         -- Check if it's a profession
         if not isHeader_ and self:IsProfession(skillName) then

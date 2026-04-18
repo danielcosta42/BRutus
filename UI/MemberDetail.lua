@@ -187,7 +187,6 @@ function PopulateDetail(frame, data)
             { label = "SPI", value = data.stats.spirit or 0 },
         }
 
-        local xPos = 0
         local colWidth = (contentWidth - 20) / 4
         for i, stat in ipairs(statsList) do
             local col = ((i - 1) % 4)
@@ -446,7 +445,7 @@ function CreateAttunementRow(parent, att, yOff, width)
         nameText:SetTextColor(C.green.r, C.green.g, C.green.b)
         nameText:SetText(att.name)
         statusText:SetTextColor(C.green.r, C.green.g, C.green.b)
-        statusText:SetText("✓ ATTUNED")
+        statusText:SetText("ATTUNED")
     elseif att.progress and att.progress > 0 then
         nameText:SetTextColor(C.gold.r, C.gold.g, C.gold.b)
         nameText:SetText(att.name)

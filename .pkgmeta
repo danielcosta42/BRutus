@@ -1,11 +1,7 @@
 package-as: BRutus
 
-externals:
-  Libs/LibStub: https://repos.wowace.com/wow/libstub/trunk
-  Libs/CallbackHandler-1.0: https://repos.wowace.com/wow/callbackhandler/trunk/CallbackHandler-1.0
-  Libs/LibSerialize: https://github.com/rossnichols/LibSerialize
-  Libs/LibDeflate: https://github.com/SafeteeWoW/LibDeflate
-  Libs/ChatThrottleLib: https://repos.wowace.com/wow/chatthrottlelib/trunk/ChatThrottleLib
+# Libraries are embedded directly as .lua files in Libs/
+# No externals needed — avoids path conflicts with single-file libs
 
 ignore:
   - README.md

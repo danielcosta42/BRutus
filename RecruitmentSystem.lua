@@ -177,7 +177,7 @@ function Recruitment:CreatePopupFrame()
     local icon = f:CreateFontString(nil, "OVERLAY")
     icon:SetFont("Fonts\\FRIZQT__.TTF", 16, "OUTLINE")
     icon:SetPoint("LEFT", 10, 0)
-    icon:SetText("📢")
+    icon:SetText("|TInterface\\MINIMAP\\TRACKING\\Mailbox:16:16|t")
 
     local text = f:CreateFontString(nil, "OVERLAY")
     text:SetFont("Fonts\\FRIZQT__.TTF", 12, "OUTLINE")

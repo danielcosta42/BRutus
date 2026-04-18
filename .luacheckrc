@@ -166,7 +166,9 @@ exclude_files = {
     "Libs/**",
 }
 
--- Ignore unused self (common in WoW callbacks/event handlers)
+-- Ignore unused self and shadowing of self (common in WoW callbacks/event handlers)
 ignore = {
-    "212/self",
+    "212/self",  -- unused argument self
+    "431/self",  -- shadowing upvalue self
+    "432/self",  -- shadowing upvalue argument self
 }

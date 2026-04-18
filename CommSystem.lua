@@ -26,7 +26,7 @@ function CommSystem:Initialize()
     -- Register for addon messages
     local frame = CreateFrame("Frame")
     frame:RegisterEvent("CHAT_MSG_ADDON")
-    frame:SetScript("OnEvent", function(_, event, prefix, msg, channel, sender)
+    frame:SetScript("OnEvent", function(_, _, prefix, msg, channel, sender)
         if prefix == BRutus.PREFIX then
             CommSystem:OnMessageReceived(msg, channel, sender)
         end
@@ -91,7 +91,7 @@ end
 ----------------------------------------------------------------------
 -- Receive a message
 ----------------------------------------------------------------------
-function CommSystem:OnMessageReceived(msg, channel, sender)
+function CommSystem:OnMessageReceived(msg, _, sender)
     -- Don't process our own messages
     local myName = UnitName("player")
     if sender == myName or sender == myName .. "-" .. GetRealmName() then
@@ -218,7 +218,7 @@ end
 ----------------------------------------------------------------------
 -- Handle data request
 ----------------------------------------------------------------------
-function CommSystem:HandleRequest(sender, data)
+function CommSystem:HandleRequest(sender, _data)
     -- Someone is requesting our data, send it back
     C_Timer.After(math.random() * 3, function()  -- Stagger responses
         local myData = BRutus.DataCollector:GetBroadcastData()
@@ -245,9 +245,9 @@ end
 ----------------------------------------------------------------------
 -- Handle version check
 ----------------------------------------------------------------------
-function CommSystem:HandleVersionCheck(sender, data)
+function CommSystem:HandleVersionCheck(_sender, data)
     -- Could notify user of newer versions
     if data and data ~= BRutus.VERSION then
-        -- Different version detected
+        BRutus:Print("A different BRutus version detected: " .. tostring(data))
     end
 end

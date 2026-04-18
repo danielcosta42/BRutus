@@ -311,7 +311,7 @@ end
 
 function BRutus:IsOfficer()
     if not IsInGuild() then return false end
-    local _, rankName, rankIndex = GetGuildInfo("player")
+    local _, _, rankIndex = GetGuildInfo("player")
     if not rankIndex then return false end
     -- Check by rank index OR by CanGuildInvite permission
     return rankIndex <= 2 or CanGuildInvite()
