@@ -374,6 +374,127 @@ function PopulateDetail(frame, data)
         end
     end
 
+    ----------------------------------------------------------------
+    -- Section: Raid Attendance
+    ----------------------------------------------------------------
+    if BRutus.RaidTracker then
+        yOff = yOff - 10
+        local playerKey = BRutus:GetPlayerKey(data.name, data.realm or GetRealmName())
+        local att = BRutus.RaidTracker:GetAttendance(playerKey)
+        local pct = BRutus.RaidTracker:GetAttendancePercent(playerKey)
+        local totalSessions = BRutus.RaidTracker:GetTotalSessions()
+        local attStr = string.format("RAID ATTENDANCE  --  %d%%  (%d/%d raids)", pct, att.raids, totalSessions)
+        yOff = CreateSectionHeader(child, attStr, yOff, contentWidth)
+
+        if att.lastRaid > 0 then
+            local lastStr = child:CreateFontString(nil, "OVERLAY")
+            lastStr:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
+            lastStr:SetPoint("TOPLEFT", 15, yOff - 5)
+            lastStr:SetTextColor(C.silver.r, C.silver.g, C.silver.b)
+            lastStr:SetText("Last raid: " .. date("%m/%d/%Y", att.lastRaid))
+            lastStr:Show()
+            yOff = yOff - 20
+        end
+    end
+
+    ----------------------------------------------------------------
+    -- Section: Loot History
+    ----------------------------------------------------------------
+    if BRutus.LootTracker then
+        yOff = yOff - 10
+        local playerKey = BRutus:GetPlayerKey(data.name, data.realm or GetRealmName())
+        local lootCount = BRutus.LootTracker:GetLootCount(playerKey)
+        local lootHeader = "LOOT HISTORY  --  " .. lootCount .. " items"
+        yOff = CreateSectionHeader(child, lootHeader, yOff, contentWidth)
+
+        local recentLoot = BRutus.LootTracker:GetPlayerLoot(playerKey, 5)
+        for _, entry in ipairs(recentLoot) do
+            local qColor = BRutus.QualityColors[entry.quality] or BRutus.QualityColors[1]
+            local itemStr = child:CreateFontString(nil, "OVERLAY")
+            itemStr:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
+            itemStr:SetPoint("TOPLEFT", 15, yOff - 5)
+            itemStr:SetWidth(contentWidth - 30)
+            itemStr:SetJustifyH("LEFT")
+            itemStr:SetWordWrap(false)
+            local dateStr = entry.timestamp and (" |cffAAAAAA" .. date("%m/%d", entry.timestamp) .. "|r") or ""
+            local raidStr = entry.raid and entry.raid ~= "" and (" |cff888888(" .. entry.raid .. ")|r") or ""
+            itemStr:SetText(string.format("|cff%02x%02x%02x%s|r%s%s",
+                qColor.r * 255, qColor.g * 255, qColor.b * 255,
+                entry.itemName or "?", raidStr, dateStr))
+            itemStr:Show()
+            yOff = yOff - 15
+        end
+        if lootCount == 0 then
+            yOff = yOff - 5
+        end
+    end
+
+    ----------------------------------------------------------------
+    -- Section: Trial Status (officer only)
+    ----------------------------------------------------------------
+    if BRutus.TrialTracker and BRutus:IsOfficer() then
+        local playerKey = BRutus:GetPlayerKey(data.name, data.realm or GetRealmName())
+        local trial = BRutus.TrialTracker:GetTrial(playerKey)
+        if trial then
+            yOff = yOff - 10
+            local daysRem = BRutus.TrialTracker:GetDaysRemaining(playerKey)
+            local daysSince = BRutus.TrialTracker:GetDaysSinceStart(playerKey)
+            local trialStr = "TRIAL STATUS  --  " .. (trial.status or "?"):upper()
+            if daysRem then trialStr = trialStr .. "  (" .. daysRem .. " days left)" end
+            yOff = CreateSectionHeader(child, trialStr, yOff, contentWidth)
+
+            local infoStr = child:CreateFontString(nil, "OVERLAY")
+            infoStr:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
+            infoStr:SetPoint("TOPLEFT", 15, yOff - 5)
+            infoStr:SetTextColor(C.silver.r, C.silver.g, C.silver.b)
+            infoStr:SetText("Sponsor: " .. (trial.sponsor or "?") .. "  |  Day " .. (daysSince or 0))
+            infoStr:Show()
+            yOff = yOff - 20
+        end
+    end
+
+    ----------------------------------------------------------------
+    -- Section: Officer Notes (officer only)
+    ----------------------------------------------------------------
+    if BRutus.OfficerNotes and BRutus:IsOfficer() then
+        yOff = yOff - 10
+        local playerKey = BRutus:GetPlayerKey(data.name, data.realm or GetRealmName())
+        local notes = BRutus.OfficerNotes:GetNotes(playerKey)
+        local notesHeader = "OFFICER NOTES  --  " .. #notes .. " notes"
+        yOff = CreateSectionHeader(child, notesHeader, yOff, contentWidth)
+
+        -- Show tags
+        local tags = BRutus.OfficerNotes:GetAllTags(playerKey)
+        if next(tags) then
+            local tagParts = {}
+            for k, v in pairs(tags) do
+                table.insert(tagParts, k .. ": " .. tostring(v))
+            end
+            local tagStr = child:CreateFontString(nil, "OVERLAY")
+            tagStr:SetFont("Fonts\\FRIZQT__.TTF", 9, "OUTLINE")
+            tagStr:SetPoint("TOPLEFT", 15, yOff - 5)
+            tagStr:SetTextColor(C.accent.r, C.accent.g, C.accent.b)
+            tagStr:SetText(table.concat(tagParts, "  |  "))
+            tagStr:Show()
+            yOff = yOff - 16
+        end
+
+        -- Show last 3 notes
+        for i = 1, math.min(3, #notes) do
+            local note = notes[i]
+            local noteStr = child:CreateFontString(nil, "OVERLAY")
+            noteStr:SetFont("Fonts\\FRIZQT__.TTF", 9, "")
+            noteStr:SetPoint("TOPLEFT", 15, yOff - 3)
+            noteStr:SetWidth(contentWidth - 30)
+            noteStr:SetJustifyH("LEFT")
+            noteStr:SetWordWrap(true)
+            local dateStr = note.timestamp and date("%m/%d", note.timestamp) or ""
+            noteStr:SetText("|cffAAAAAA[" .. (note.author or "?") .. " " .. dateStr .. "]|r " .. (note.text or ""))
+            noteStr:Show()
+            yOff = yOff - (noteStr:GetStringHeight() + 4)
+        end
+    end
+
     -- Update scroll child height
     child:SetHeight(math.abs(yOff) + 20)
 end

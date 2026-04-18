@@ -121,6 +121,15 @@ local DB_DEFAULTS = {
         lastImport = 0,
         importedBy = "",
     },
+    raidTracker = {
+        sessions = {},
+        attendance = {},
+    },
+    lootHistory = {},
+    officerNotes = {},
+    trials = {},
+    consumableChecks = { lastResults = {} },
+
 }
 
 ----------------------------------------------------------------------
@@ -194,6 +203,23 @@ function BRutus:OnLogin()
     if BRutus.TMB then
         BRutus.TMB:Initialize()
     end
+    if BRutus.RaidTracker then
+        BRutus.RaidTracker:Initialize()
+    end
+    if BRutus.LootTracker then
+        BRutus.LootTracker:Initialize()
+    end
+    if BRutus.OfficerNotes then
+        BRutus.OfficerNotes:Initialize()
+    end
+    if BRutus.TrialTracker then
+        BRutus.TrialTracker:Initialize()
+        BRutus.TrialTracker:CheckExpired()
+    end
+    if BRutus.ConsumableChecker then
+        BRutus.ConsumableChecker:Initialize()
+    end
+
 
     -- Hook chat player links for guild invite
     BRutus:HookChatInvite()
@@ -259,6 +285,40 @@ SlashCmdList["BRUTUS"] = function(msg)
         end
         if BRutus.Recruitment then
             BRutus.Recruitment:HandleCommand(args)
+        end
+    elseif msg == "consumables" or msg == "cons" then
+        if BRutus.ConsumableChecker then
+            local results = BRutus.ConsumableChecker:CheckRaid()
+            if results then
+                local missing = BRutus.ConsumableChecker:GetMissingCount(results)
+                BRutus:Print("Consumable check done. " .. missing .. " players missing buffs.")
+            end
+        end
+    elseif msg == "consreport" then
+        if BRutus.ConsumableChecker then
+            BRutus.ConsumableChecker:ReportToChat("RAID")
+        end
+    elseif msg:match("^trial") then
+        local rest = msg:gsub("^trial%s*", "")
+        local name = rest:match("^(%S+)")
+        if name and BRutus.TrialTracker then
+            local realm = GetRealmName()
+            local key = name .. "-" .. realm
+            BRutus.TrialTracker:AddTrial(key)
+        else
+            BRutus:Print("Usage: /brutus trial <PlayerName>")
+        end
+    elseif msg:match("^note") then
+        local rest = msg:gsub("^note%s*", "")
+        local target, noteText = rest:match("^(%S+)%s+(.+)$")
+        if target and noteText and BRutus.OfficerNotes then
+            local realm = GetRealmName()
+            local key = target .. "-" .. realm
+            if BRutus.OfficerNotes:AddNote(key, noteText) then
+                BRutus:Print("Note added for " .. target)
+            end
+        else
+            BRutus:Print("Usage: /brutus note <PlayerName> <text>")
         end
     else
         BRutus:ToggleRoster()

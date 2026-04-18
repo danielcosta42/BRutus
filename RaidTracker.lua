@@ -1,0 +1,363 @@
+----------------------------------------------------------------------
+-- BRutus Guild Manager - Raid Attendance Tracker
+-- Tracks raid attendance, logs raid sessions, computes attendance %
+----------------------------------------------------------------------
+local RaidTracker = {}
+BRutus.RaidTracker = RaidTracker
+
+-- TBC Raid instance IDs
+RaidTracker.RAID_INSTANCES = {
+    [532]  = "Karazhan",
+    [544]  = "Magtheridon",
+    [565]  = "Gruul's Lair",
+    [548]  = "Serpentshrine Cavern",
+    [550]  = "Tempest Keep",
+    [534]  = "Hyjal Summit",
+    [564]  = "Black Temple",
+    [580]  = "Sunwell Plateau",
+    [509]  = "AQ20",
+    [531]  = "AQ40",
+    [533]  = "Naxxramas",
+    [309]  = "Zul'Gurub",
+    [469]  = "BWL",
+    [409]  = "Molten Core",
+}
+
+RaidTracker.currentRaid = nil
+RaidTracker.trackingActive = false
+RaidTracker.snapshotTimer = nil
+
+-- Attendance penalty weights
+RaidTracker.PENALTIES = {
+    LATE       = 10,  -- arrived after first snapshot
+    LEFT_EARLY = 10,  -- absent from last snapshot
+    NO_CONSUMES = 10, -- no consumables during raid
+}
+-- Max score per session = 100, penalties subtract from it
+
+function RaidTracker:Initialize()
+    if not BRutus.db.raidTracker then
+        BRutus.db.raidTracker = { sessions = {}, attendance = {} }
+    end
+
+    local frame = CreateFrame("Frame")
+    frame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+    frame:RegisterEvent("RAID_ROSTER_UPDATE")
+    frame:RegisterEvent("GROUP_ROSTER_UPDATE")
+    frame:RegisterEvent("ENCOUNTER_START")
+    frame:RegisterEvent("ENCOUNTER_END")
+    frame:SetScript("OnEvent", function(_, event, ...)
+        if event == "ZONE_CHANGED_NEW_AREA" then
+            RaidTracker:CheckZone()
+        elseif event == "RAID_ROSTER_UPDATE" or event == "GROUP_ROSTER_UPDATE" then
+            if RaidTracker.trackingActive then
+                RaidTracker:TakeSnapshot("roster_change")
+            end
+        elseif event == "ENCOUNTER_START" then
+            local encounterID, encounterName = ...
+            RaidTracker:OnEncounterStart(encounterID, encounterName)
+        elseif event == "ENCOUNTER_END" then
+            local encounterID, encounterName, _, _, success = ...
+            RaidTracker:OnEncounterEnd(encounterID, encounterName, success)
+        end
+    end)
+end
+
+function RaidTracker:CheckZone()
+    local _, instanceType, _, _, _, _, _, instanceID = GetInstanceInfo()
+    if instanceType == "raid" and self.RAID_INSTANCES[instanceID] then
+        if not self.trackingActive then
+            self:StartSession(instanceID)
+        end
+    else
+        if self.trackingActive then
+            self:EndSession()
+        end
+    end
+end
+
+function RaidTracker:StartSession(instanceID)
+    local raidName = self.RAID_INSTANCES[instanceID] or "Unknown"
+    self.trackingActive = true
+    self.currentRaid = {
+        instanceID = instanceID,
+        name = raidName,
+        startTime = GetServerTime(),
+        endTime = nil,
+        snapshots = {},
+        encounters = {},
+        players = {},
+    }
+    self:TakeSnapshot("session_start")
+
+    -- Periodic snapshots every 5 minutes
+    self.snapshotTimer = C_Timer.NewTicker(300, function()
+        if self.trackingActive then
+            self:TakeSnapshot("periodic")
+        end
+    end)
+
+    BRutus:Print("Raid tracking started: |cffFFD700" .. raidName .. "|r")
+end
+
+function RaidTracker:EndSession()
+    if not self.currentRaid then return end
+
+    self:TakeSnapshot("session_end")
+    self.currentRaid.endTime = GetServerTime()
+    self.trackingActive = false
+
+    if self.snapshotTimer then
+        self.snapshotTimer:Cancel()
+        self.snapshotTimer = nil
+    end
+
+    -- Save session
+    local sessionID = self.currentRaid.startTime
+    BRutus.db.raidTracker.sessions[sessionID] = self.currentRaid
+
+    -- Update attendance records
+    self:UpdateAttendanceRecords(self.currentRaid)
+
+    BRutus:Print("Raid tracking ended: |cffFFD700" .. self.currentRaid.name .. "|r")
+    self.currentRaid = nil
+end
+
+function RaidTracker:TakeSnapshot(reason)
+    if not self.currentRaid then return end
+
+    local members = {}
+    local numMembers = GetNumGroupMembers()
+    if numMembers == 0 then return end
+
+    local isRaid = IsInRaid()
+    for i = 1, numMembers do
+        local unit = isRaid and ("raid" .. i) or ("party" .. i)
+        if UnitExists(unit) then
+            local name, realm = UnitName(unit)
+            if name then
+                realm = realm and realm ~= "" and realm or GetRealmName()
+                local key = name .. "-" .. realm
+                members[key] = {
+                    name = name,
+                    class = select(2, UnitClass(unit)) or "UNKNOWN",
+                    online = UnitIsConnected(unit),
+                    hasConsumes = self:CheckPlayerConsumes(unit),
+                }
+                self.currentRaid.players[key] = true
+            end
+        end
+    end
+
+    -- Include self
+    local myName = UnitName("player")
+    local myRealm = GetRealmName()
+    local myKey = myName .. "-" .. myRealm
+    members[myKey] = {
+        name = myName,
+        class = select(2, UnitClass("player")),
+        online = true,
+        hasConsumes = self:CheckPlayerConsumes("player"),
+    }
+    self.currentRaid.players[myKey] = true
+
+    table.insert(self.currentRaid.snapshots, {
+        time = GetServerTime(),
+        reason = reason,
+        members = members,
+        count = self:CountTable(members),
+    })
+end
+
+----------------------------------------------------------------------
+-- Check if a unit has at least flask/elixir + food active
+----------------------------------------------------------------------
+function RaidTracker:CheckPlayerConsumes(unit)
+    if not BRutus.ConsumableChecker then return true end
+
+    local CC = BRutus.ConsumableChecker
+    local hasFlaskOrElixir = false
+    local hasFood = false
+
+    -- Check flask
+    for buffID in pairs(CC.CONSUMABLES.flask.buffs) do
+        if CC:UnitHasBuff(unit, buffID) then
+            hasFlaskOrElixir = true
+            break
+        end
+    end
+
+    -- If no flask, check battle elixir as alternative
+    if not hasFlaskOrElixir then
+        for buffID in pairs(CC.CONSUMABLES.battleElixir.buffs) do
+            if CC:UnitHasBuff(unit, buffID) then
+                hasFlaskOrElixir = true
+                break
+            end
+        end
+    end
+
+    -- Check food
+    for buffID in pairs(CC.CONSUMABLES.food.buffs) do
+        if CC:UnitHasBuff(unit, buffID) then
+            hasFood = true
+            break
+        end
+    end
+
+    return hasFlaskOrElixir and hasFood
+end
+
+function RaidTracker:OnEncounterStart(encounterID, encounterName)
+    if not self.currentRaid then return end
+    self:TakeSnapshot("encounter_start")
+    table.insert(self.currentRaid.encounters, {
+        id = encounterID,
+        name = encounterName,
+        startTime = GetServerTime(),
+        endTime = nil,
+        success = nil,
+    })
+end
+
+function RaidTracker:OnEncounterEnd(encounterID, encounterName, success)
+    if not self.currentRaid then return end
+    self:TakeSnapshot("encounter_end")
+
+    -- Update the last encounter with this ID
+    for i = #self.currentRaid.encounters, 1, -1 do
+        local enc = self.currentRaid.encounters[i]
+        if enc.id == encounterID and not enc.endTime then
+            enc.endTime = GetServerTime()
+            enc.success = (success == 1)
+            break
+        end
+    end
+
+    local status = (success == 1) and "|cff00ff00KILL|r" or "|cffff3333WIPE|r"
+    BRutus:Print(encounterName .. " - " .. status)
+end
+
+function RaidTracker:UpdateAttendanceRecords(session)
+    local att = BRutus.db.raidTracker.attendance
+    local snapshots = session.snapshots or {}
+    local firstSnap = snapshots[1]
+    local lastSnap = snapshots[#snapshots]
+
+    for playerKey in pairs(session.players) do
+        if not att[playerKey] then
+            att[playerKey] = { raids = 0, lastRaid = 0, totalScore = 0 }
+        end
+        -- Migrate old records that lack totalScore
+        if not att[playerKey].totalScore then
+            att[playerKey].totalScore = att[playerKey].raids * 100
+        end
+
+        att[playerKey].raids = att[playerKey].raids + 1
+        att[playerKey].lastRaid = session.startTime
+
+        -- Start at 100, apply penalties
+        local score = 100
+
+        -- LATE: player was NOT in the first snapshot
+        if firstSnap and firstSnap.members and not firstSnap.members[playerKey] then
+            score = score - self.PENALTIES.LATE
+        end
+
+        -- LEFT EARLY: player was NOT in the last snapshot
+        if lastSnap and lastSnap.members and not lastSnap.members[playerKey] then
+            score = score - self.PENALTIES.LEFT_EARLY
+        end
+
+        -- NO CONSUMABLES: check if player had consumes in the majority of snapshots
+        local consumeChecks = 0
+        local consumeHits = 0
+        for _, snap in ipairs(snapshots) do
+            if snap.members and snap.members[playerKey] then
+                consumeChecks = consumeChecks + 1
+                if snap.members[playerKey].hasConsumes then
+                    consumeHits = consumeHits + 1
+                end
+            end
+        end
+        -- Penalize if less than 50% of snapshots had consumables
+        if consumeChecks > 0 and (consumeHits / consumeChecks) < 0.5 then
+            score = score - self.PENALTIES.NO_CONSUMES
+        end
+
+        score = math.max(0, math.min(100, score))
+        att[playerKey].totalScore = att[playerKey].totalScore + score
+    end
+end
+
+function RaidTracker:GetAttendance(playerKey)
+    local att = BRutus.db.raidTracker.attendance
+    if att and att[playerKey] then
+        return att[playerKey]
+    end
+    return { raids = 0, lastRaid = 0 }
+end
+
+function RaidTracker:GetTotalSessions()
+    local count = 0
+    for _ in pairs(BRutus.db.raidTracker.sessions) do
+        count = count + 1
+    end
+    return count
+end
+
+function RaidTracker:GetAttendancePercent(playerKey)
+    local total = self:GetTotalSessions()
+    if total == 0 then return 0 end
+    local att = self:GetAttendance(playerKey)
+    if att.raids == 0 then return 0 end
+
+    -- Use weighted score if available (100 = perfect session)
+    if att.totalScore then
+        -- Average score across ALL sessions (absent sessions count as 0)
+        return math.floor(att.totalScore / (total * 100) * 100 + 0.5)
+    end
+
+    -- Fallback for old data without scores
+    return math.floor((att.raids / total) * 100 + 0.5)
+end
+
+function RaidTracker:GetRecentSessions(limit)
+    limit = limit or 20
+    local sessions = {}
+    for id, session in pairs(BRutus.db.raidTracker.sessions) do
+        table.insert(sessions, { id = id, data = session })
+    end
+    table.sort(sessions, function(a, b) return a.id > b.id end)
+    local result = {}
+    for i = 1, math.min(limit, #sessions) do
+        result[i] = sessions[i]
+    end
+    return result
+end
+
+function RaidTracker:DeleteSession(sessionID)
+    local session = BRutus.db.raidTracker.sessions[sessionID]
+    if not session then return end
+
+    -- Decrement attendance for players in this session
+    -- Since we don't store per-session scores, estimate 100 per removed session
+    for playerKey in pairs(session.players) do
+        local att = BRutus.db.raidTracker.attendance[playerKey]
+        if att then
+            att.raids = math.max(0, att.raids - 1)
+            if att.totalScore then
+                -- Approximate: remove average score per session for this player
+                local avgScore = att.raids > 0 and (att.totalScore / (att.raids + 1)) or 100
+                att.totalScore = math.max(0, att.totalScore - avgScore)
+            end
+        end
+    end
+    BRutus.db.raidTracker.sessions[sessionID] = nil
+end
+
+function RaidTracker:CountTable(t)
+    local n = 0
+    for _ in pairs(t) do n = n + 1 end
+    return n
+end

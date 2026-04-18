@@ -66,6 +66,9 @@ read_globals = {
     "UnitHealthMax",
     "UnitPowerMax",
     "UnitStat",
+    "UnitExists",
+    "UnitIsConnected",
+    "UnitBuff",
 
     -- WoW API: Guild functions
     "IsInGuild",
@@ -144,6 +147,11 @@ read_globals = {
     "hooksecurefunc",
     "securecallfunction",
     "StaticPopup_Show",
+
+    -- WoW API: Instance & Raid
+    "GetInstanceInfo",
+    "GetNumGroupMembers",
+    "IsInRaid",
 
     -- WoW API: Scroll frames
     "FauxScrollFrame_Update",

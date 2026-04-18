@@ -26,8 +26,14 @@ AttunementTracker.lua
 CommSystem.lua
 RecruitmentSystem.lua
 TMBIntegration.lua
+RaidTracker.lua
+LootTracker.lua
+OfficerNotes.lua
+TrialTracker.lua
+ConsumableChecker.lua
 
 # UI
 UI\Helpers.lua
+UI\FeaturePanels.lua
 UI\RosterFrame.lua
 UI\MemberDetail.lua

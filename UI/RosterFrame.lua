@@ -14,14 +14,15 @@ local COLUMNS = {
     { key = "race",        label = "RACE",        width = 80,  align = "LEFT" },
     { key = "avgIlvl",     label = "iLVL",        width = 50,  align = "CENTER" },
     { key = "professions", label = "PROFESSIONS", width = 160, align = "LEFT" },
-    { key = "attunements", label = "ATTUNEMENTS",  width = 170, align = "LEFT" },
+    { key = "attunements", label = "ATTUNEMENTS",  width = 140, align = "LEFT" },
+    { key = "attendance", label = "ATT%",         width = 50,  align = "CENTER" },
     { key = "lastSeen",    label = "LAST SEEN",   width = 80,  align = "RIGHT" },
 }
 
 local ROW_HEIGHT = 32
 local HEADER_HEIGHT = 36
 local VISIBLE_ROWS = 18
-local FRAME_WIDTH = 880
+local FRAME_WIDTH = 960
 local FRAME_HEIGHT = HEADER_HEIGHT + (ROW_HEIGHT * VISIBLE_ROWS) + 150  -- extra space for tab bar
 
 local TAB_HEIGHT = 28
@@ -215,6 +216,9 @@ function BRutus.CreateRosterFrame()
     -- Create tabs
     CreateTab("roster", "Roster", false)
     CreateTab("tmb", "TMB Loot", false)
+    CreateTab("raids", "Raids", false)
+    CreateTab("loot", "Loot", false)
+    CreateTab("trials", "Trials", true)
     CreateTab("recruitment", "Recruitment", true)
 
     ----------------------------------------------------------------
@@ -411,6 +415,36 @@ function BRutus.CreateRosterFrame()
     BRutus:CreateTMBPanel(tmbPanel, frame)
 
     ----------------------------------------------------------------
+    -- RAID ATTENDANCE PANEL
+    ----------------------------------------------------------------
+    local raidsPanel = CreateFrame("Frame", nil, frame)
+    raidsPanel:SetPoint("TOPLEFT", 0, contentTop)
+    raidsPanel:SetPoint("BOTTOMRIGHT", 0, 30)
+    raidsPanel:Hide()
+    frame.tabPanels["raids"] = raidsPanel
+    BRutus:CreateRaidsPanel(raidsPanel, frame)
+
+    ----------------------------------------------------------------
+    -- LOOT HISTORY PANEL
+    ----------------------------------------------------------------
+    local lootPanel = CreateFrame("Frame", nil, frame)
+    lootPanel:SetPoint("TOPLEFT", 0, contentTop)
+    lootPanel:SetPoint("BOTTOMRIGHT", 0, 30)
+    lootPanel:Hide()
+    frame.tabPanels["loot"] = lootPanel
+    BRutus:CreateLootPanel(lootPanel, frame)
+
+    ----------------------------------------------------------------
+    -- TRIAL TRACKER PANEL (officer only)
+    ----------------------------------------------------------------
+    local trialsPanel = CreateFrame("Frame", nil, frame)
+    trialsPanel:SetPoint("TOPLEFT", 0, contentTop)
+    trialsPanel:SetPoint("BOTTOMRIGHT", 0, 30)
+    trialsPanel:Hide()
+    frame.tabPanels["trials"] = trialsPanel
+    BRutus:CreateTrialsPanel(trialsPanel, frame)
+
+    ----------------------------------------------------------------
     -- Bottom Bar
     ----------------------------------------------------------------
     local bottomBar = CreateFrame("Frame", nil, frame)
@@ -596,6 +630,10 @@ function BRutus.CreateRosterFrame()
                 va, vb = a.avgIlvl, b.avgIlvl
             elseif sortBy == "lastSeen" then
                 va, vb = a.lastUpdate, b.lastUpdate
+            elseif sortBy == "attendance" then
+                local pa = BRutus.RaidTracker and BRutus.RaidTracker:GetAttendancePercent(a.key) or 0
+                local pb = BRutus.RaidTracker and BRutus.RaidTracker:GetAttendancePercent(b.key) or 0
+                va, vb = pa, pb
             else
                 va, vb = a.level, b.level
             end
@@ -798,11 +836,20 @@ function CreateRosterRow(parent, rowIndex)
     row.attText = attText
     xOff = xOff + COLUMNS[8].width
 
+    -- Attendance %
+    local attPctText = row:CreateFontString(nil, "OVERLAY")
+    attPctText:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
+    attPctText:SetPoint("LEFT", xOff, 0)
+    attPctText:SetWidth(COLUMNS[9].width)
+    attPctText:SetJustifyH("CENTER")
+    row.attPctText = attPctText
+    xOff = xOff + COLUMNS[9].width
+
     -- Last Seen
     local lastSeenText = row:CreateFontString(nil, "OVERLAY")
     lastSeenText:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
     lastSeenText:SetPoint("LEFT", xOff, 0)
-    lastSeenText:SetWidth(COLUMNS[9].width)
+    lastSeenText:SetWidth(COLUMNS[10].width)
     lastSeenText:SetJustifyH("RIGHT")
     lastSeenText:SetTextColor(C.silver.r, C.silver.g, C.silver.b)
     row.lastSeenText = lastSeenText
@@ -935,6 +982,27 @@ function UpdateRosterRow(row, data, rowIndex)
         row.attText:SetText("|cff666666No data|r")
     end
 
+    -- Attendance %
+    if BRutus.RaidTracker then
+        local pct = BRutus.RaidTracker:GetAttendancePercent(data.key)
+        if pct > 0 then
+            local ar, ag, ab
+            if pct >= 75 then
+                ar, ag, ab = textColor(C.green.r, C.green.g, C.green.b)
+            elseif pct >= 50 then
+                ar, ag, ab = textColor(C.gold.r, C.gold.g, C.gold.b)
+            else
+                ar, ag, ab = textColor(C.red.r, C.red.g, C.red.b)
+            end
+            row.attPctText:SetTextColor(ar, ag, ab)
+            row.attPctText:SetText(pct .. "%")
+        else
+            row.attPctText:SetText("|cff666666—|r")
+        end
+    else
+        row.attPctText:SetText("")
+    end
+
     -- Last seen
     if data.isOnline then
         row.lastSeenText:SetText("|cff4CFF4CNow|r")
@@ -1045,6 +1113,35 @@ local function MemberDropdown_Initialize(self, level)
         BRutus:ShowMemberDetail(data)
     end
     UIDropDownMenu_AddButton(info, level)
+
+    -- Officer actions
+    if not isMe and BRutus:IsOfficer() then
+        -- Mark as trial
+        if BRutus.TrialTracker then
+            local key = data.key or BRutus:GetPlayerKey(data.name, data.realm or GetRealmName())
+            if not BRutus.TrialTracker:IsTrial(key) then
+                info = UIDropDownMenu_CreateInfo()
+                info.notCheckable = true
+                info.text = "|cffFFAA00Mark as Trial|r"
+                info.func = function()
+                    BRutus.TrialTracker:AddTrial(key)
+                end
+                UIDropDownMenu_AddButton(info, level)
+            end
+        end
+
+        -- Add officer note
+        if BRutus.OfficerNotes then
+            info = UIDropDownMenu_CreateInfo()
+            info.notCheckable = true
+            info.text = "|cff8888FFAdd Note|r"
+            info.func = function()
+                -- Simple note via chat input
+                BRutus:Print("Use: /brutus note " .. data.name .. " <your note>")
+            end
+            UIDropDownMenu_AddButton(info, level)
+        end
+    end
 
     -- Cancel
     info = UIDropDownMenu_CreateInfo()

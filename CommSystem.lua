@@ -167,6 +167,11 @@ function CommSystem:OnMessageReceived(msg, _, sender)
         if BRutus.TMB then
             BRutus.TMB:HandleTMBData(data)
         end
+    elseif msgType == "ON" then
+        if BRutus.OfficerNotes then
+            BRutus.OfficerNotes:HandleIncoming(data)
+        end
+
     end
 end
 
