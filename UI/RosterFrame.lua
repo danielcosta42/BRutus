@@ -966,6 +966,12 @@ function BRutus:CreateRecruitmentPanel(parent, mainFrame)
     ----------------------------------------------------------------
     yOff = SectionHeader("Auto-Recruit Messages", yOff)
 
+    -- Info note about Blizzard restriction
+    local infoNote = UI:CreateText(parent, "⚠ Blizzard requires a click to send channel messages. A popup will appear on interval.", 10, 0.7, 0.55, 0.2)
+    infoNote:SetPoint("TOPLEFT", 30, yOff)
+    infoNote:SetWidth(700)
+    yOff = yOff - 18
+
     -- Status + toggle
     RowLabel("Status:", yOff)
     local statusText = UI:CreateText(parent, "", 11, C.white.r, C.white.g, C.white.b)
@@ -973,6 +979,15 @@ function BRutus:CreateRecruitmentPanel(parent, mainFrame)
 
     local toggleBtn = UI:CreateButton(parent, "Enable", 80, 22)
     toggleBtn:SetPoint("TOPLEFT", 300, yOff + 3)
+
+    -- Manual send button
+    local sendNowBtn = UI:CreateButton(parent, "📢 Send Now", 100, 22)
+    sendNowBtn:SetPoint("TOPLEFT", 390, yOff + 3)
+    sendNowBtn:SetScript("OnClick", function()
+        if BRutus.Recruitment then
+            BRutus.Recruitment:DoSendRecruitmentMessage()
+        end
+    end)
 
     local function UpdateRecruitStatus()
         local s = BRutus.db.recruitment

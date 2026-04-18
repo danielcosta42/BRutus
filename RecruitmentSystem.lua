@@ -100,16 +100,18 @@ function Recruitment:StartAutoRecruit()
 
     local interval = math.max(settings.interval, 60) -- minimum 60s safety
 
+    -- NOTE: SendChatMessage("CHANNEL") requires a hardware event (Blizzard restriction).
+    -- We show a clickable popup instead of sending automatically.
     self.ticker = C_Timer.NewTicker(interval, function()
-        self:SendRecruitmentMessage()
+        self:ShowSendPopup()
     end)
 
-    -- Send first message after a short delay
+    -- Show first popup after a short delay
     C_Timer.After(2, function()
-        self:SendRecruitmentMessage()
+        self:ShowSendPopup()
     end)
 
-    BRutus:Print("Recruitment |cff4CFF4Cstarted|r — posting every " .. interval .. "s.")
+    BRutus:Print("Recruitment |cff4CFF4Cstarted|r — popup every " .. interval .. "s. Click to send!")
     return true
 end
 
@@ -121,6 +123,9 @@ function Recruitment:StopAutoRecruit()
     if self.ticker then
         self.ticker:Cancel()
         self.ticker = nil
+    end
+    if self.popupFrame then
+        self.popupFrame:Hide()
     end
     BRutus:Print("Recruitment |cffFF4444stopped|r.")
 end
@@ -138,47 +143,135 @@ function Recruitment:Toggle()
 end
 
 ----------------------------------------------------------------------
--- Send the recruitment message to configured channels
--- Uses a secure frame to avoid taint issues with SendChatMessage
+-- Create the send popup (one-time)
 ----------------------------------------------------------------------
-function Recruitment:SendRecruitmentMessage()
+function Recruitment:CreatePopupFrame()
+    if self.popupFrame then return end
+
+    local C = BRutus.Colors
+    local f = CreateFrame("Button", "BRutusRecruitPopup", UIParent, "BackdropTemplate")
+    f:SetSize(300, 50)
+    f:SetPoint("TOP", UIParent, "TOP", 0, -80)
+    f:SetBackdrop({
+        bgFile   = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = 1,
+    })
+    f:SetBackdropColor(0.08, 0.06, 0.14, 0.95)
+    f:SetBackdropBorderColor(C.accent.r, C.accent.g, C.accent.b, 0.8)
+    f:SetFrameStrata("DIALOG")
+    f:SetMovable(true)
+    f:EnableMouse(true)
+    f:RegisterForDrag("LeftButton")
+    f:SetScript("OnDragStart", function(self) self:StartMoving() end)
+    f:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
+    f:Hide()
+
+    -- Glow pulse
+    local glow = f:CreateTexture(nil, "BACKGROUND", nil, -1)
+    glow:SetTexture("Interface\\Buttons\\WHITE8x8")
+    glow:SetPoint("TOPLEFT", -2, 2)
+    glow:SetPoint("BOTTOMRIGHT", 2, -2)
+    glow:SetVertexColor(C.accent.r, C.accent.g, C.accent.b, 0.15)
+
+    local icon = f:CreateFontString(nil, "OVERLAY")
+    icon:SetFont("Fonts\\FRIZQT__.TTF", 16, "OUTLINE")
+    icon:SetPoint("LEFT", 10, 0)
+    icon:SetText("📢")
+
+    local text = f:CreateFontString(nil, "OVERLAY")
+    text:SetFont("Fonts\\FRIZQT__.TTF", 12, "OUTLINE")
+    text:SetPoint("LEFT", icon, "RIGHT", 8, 0)
+    text:SetTextColor(C.gold.r, C.gold.g, C.gold.b)
+    text:SetText("Click to send recruit msg!")
+    f.label = text
+
+    local dismiss = CreateFrame("Button", nil, f)
+    dismiss:SetSize(20, 20)
+    dismiss:SetPoint("TOPRIGHT", -4, -4)
+    dismiss:SetNormalFontObject(GameFontNormalSmall)
+    local dText = dismiss:CreateFontString(nil, "OVERLAY")
+    dText:SetFont("Fonts\\FRIZQT__.TTF", 14, "OUTLINE")
+    dText:SetPoint("CENTER")
+    dText:SetText("×")
+    dText:SetTextColor(0.6, 0.6, 0.6)
+    dismiss:SetScript("OnEnter", function() dText:SetTextColor(1, 0.3, 0.3) end)
+    dismiss:SetScript("OnLeave", function() dText:SetTextColor(0.6, 0.6, 0.6) end)
+    dismiss:SetScript("OnClick", function() f:Hide() end)
+
+    -- The main click = hardware event -> sends the message
+    f:SetScript("OnClick", function(self)
+        Recruitment:DoSendRecruitmentMessage()
+        self:Hide()
+    end)
+
+    f:SetScript("OnEnter", function(self)
+        self:SetBackdropBorderColor(C.gold.r, C.gold.g, C.gold.b, 1.0)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:AddLine("BRutus Recruitment", C.gold.r, C.gold.g, C.gold.b)
+        GameTooltip:AddLine("Left-click to post recruitment message.", 0.8, 0.8, 0.8, true)
+        GameTooltip:AddLine("Drag to move. × to dismiss.", 0.5, 0.5, 0.5, true)
+        GameTooltip:Show()
+    end)
+    f:SetScript("OnLeave", function(self)
+        self:SetBackdropBorderColor(C.accent.r, C.accent.g, C.accent.b, 0.8)
+        GameTooltip:Hide()
+    end)
+
+    self.popupFrame = f
+end
+
+----------------------------------------------------------------------
+-- Show the popup notification
+----------------------------------------------------------------------
+function Recruitment:ShowSendPopup()
+    if not BRutus.db.recruitment.enabled then return end
+    if InCombatLockdown() then return end
+    if not self:CanUseRecruitment() then return end
+
+    self:CreatePopupFrame()
+
+    -- Update channel list in label
+    local channels = BRutus.db.recruitment.channels
+    local chText = table.concat(channels, ", ")
+    self.popupFrame.label:SetText("Click to recruit! → " .. chText)
+    self.popupFrame:Show()
+
+    -- Auto-hide after 30s if not clicked
+    C_Timer.After(30, function()
+        if self.popupFrame and self.popupFrame:IsShown() then
+            self.popupFrame:Hide()
+        end
+    end)
+end
+
+----------------------------------------------------------------------
+-- Actually send the message (called from button click = hardware event)
+----------------------------------------------------------------------
+function Recruitment:DoSendRecruitmentMessage()
     if not IsInGuild() then return end
-    if not self:CanUseRecruitment() then
-        self:StopAutoRecruit()
-        return
-    end
-    if InCombatLockdown() then return end -- never send during combat
 
     local settings = BRutus.db.recruitment
     local msg = settings.message
-    if not msg or msg == "" then return end
-
-    -- Throttle safety
-    local now = GetTime()
-    if now - self.lastSend < 30 then return end
-    self.lastSend = now
-
-    -- Queue messages through OnUpdate to avoid taint from C_Timer
-    if not self.sendFrame then
-        self.sendFrame = CreateFrame("Frame")
+    if not msg or msg == "" then
+        BRutus:Print("|cffFF4444No recruitment message set.|r")
+        return
     end
-    self.pendingSends = {}
+
+    local sent = false
     for _, channelName in ipairs(settings.channels) do
         local channelNum = GetChannelName(channelName)
         if channelNum and channelNum > 0 then
-            table.insert(self.pendingSends, { msg = msg, channel = channelNum })
+            SendChatMessage(msg, "CHANNEL", nil, channelNum)
+            sent = true
         end
     end
 
-    if #self.pendingSends > 0 then
-        self.sendFrame:SetScript("OnUpdate", function(frame)
-            frame:SetScript("OnUpdate", nil)
-            if InCombatLockdown() then return end
-            for _, info in ipairs(self.pendingSends) do
-                SendChatMessage(info.msg, "CHANNEL", nil, info.channel)
-            end
-            self.pendingSends = nil
-        end)
+    if sent then
+        self.lastSend = GetTime()
+        BRutus:Print("Recruitment message sent!")
+    else
+        BRutus:Print("|cffFF4444No valid channels found. Join a channel first.|r")
     end
 end
 
