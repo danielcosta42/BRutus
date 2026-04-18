@@ -68,7 +68,8 @@ jobs:
           echo "next=$NEXT" >> "$GITHUB_OUTPUT"
 
       - name: Update TOC version
-        run: sed -i "s/^## Version: .*/## Version: ${{ steps.version.outputs.next }}/" BRutus.toc
+        run: |
+          sed -i "s/^## Version: .*/## Version: ${{ steps.version.outputs.next }}/" BRutus.toc
 
       - name: Commit version bump
         run: |
