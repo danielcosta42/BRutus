@@ -1,0 +1,27 @@
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Build / Release
+*.zip
+*.tar.gz
+release/
+.release/
+
+# WoW specific
+!BRutus.toc
+WTF/
+Cache/
+
+# Misc
+*.log
+*.bak
+*.tmp

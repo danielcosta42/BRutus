@@ -115,3 +115,7 @@ The more guild members who install it, the more data you'll see!
 ## Feedback & Bugs
 
 Found a bug or have a suggestion? Open an issue on the project page!
+
+---
+
+[![GitHub](https://img.shields.io/badge/GitHub-BRutus-181717?logo=github)](https://github.com/danielcosta42/BRutus)

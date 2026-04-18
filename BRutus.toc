@@ -1,10 +1,14 @@
 ## Interface: 20504
 ## Title: |cffFFD700BRutus|r |cff888888Guild Manager|r
 ## Notes: Premium Guild Roster & Member Inspector for TBC Anniversary
-## Author: BRutus Guild
+## Author: danielcosta42
 ## Version: 1.0.0
 ## SavedVariables: BRutusDB
 ## DefaultState: enabled
+## X-License: MIT
+## X-Category: Guild
+## X-Website: https://github.com/danielcosta42/BRutus
+## X-Curse-Project-ID: CHANGEME
 
 # Libraries
 Libs\LibStub.lua

@@ -1,0 +1,26 @@
+package-as: BRutus
+
+externals:
+  Libs/LibStub: https://repos.wowace.com/wow/libstub/trunk
+  Libs/CallbackHandler-1.0: https://repos.wowace.com/wow/callbackhandler/trunk/CallbackHandler-1.0
+  Libs/LibSerialize: https://github.com/rossnichols/LibSerialize
+  Libs/LibDeflate: https://github.com/SafeteeWoW/LibDeflate
+  Libs/ChatThrottleLib: https://repos.wowace.com/wow/chatthrottlelib/trunk/ChatThrottleLib
+
+ignore:
+  - README.md
+  - CURSEFORGE.md
+  - CHANGELOG.md
+  - LICENSE
+  - .github
+  - .gitignore
+  - .gitattributes
+  - .luacheckrc
+  - screenshots
+  - "*.md"
+
+manual-changelog:
+  filename: CHANGELOG.md
+  markup-type: markdown
+
+enable-nolib-creation: no

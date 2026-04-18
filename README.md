@@ -116,4 +116,12 @@ Pressing **J** (or however you open the guild frame) opens BRutus instead of the
 
 ## License
 
-All rights reserved. This addon is provided as-is for personal use.
+MIT License — see [LICENSE](LICENSE) for details.
+
+Third-party libraries are included under their own respective licenses (MIT, zlib, Public Domain).
+
+---
+
+## Contributing
+
+Bug reports and feature requests are welcome! Please use the [GitHub Issues](https://github.com/danielcosta42/BRutus/issues) page.
