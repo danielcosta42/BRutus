@@ -1,0 +1,21 @@
+name: Publish to CurseForge
+
+on:
+  workflow_dispatch:
+
+jobs:
+  publish:
+    name: Package & Upload
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Package and publish to CurseForge
+        uses: BigWigsMods/packager@v2
+        with:
+          args: -g bcc
+        env:
+          CF_API_KEY: ${{ secrets.CF_API_KEY }}
