@@ -104,6 +104,35 @@ read_globals = {
     "JoinChannelByName",
     "EnumerateServerChannels",
     "ChatFrame_AddMessageEventFilter",
+    "ChatFrame_SendTell",
+
+    -- WoW API: Social & Group
+    "InviteUnit",
+    "InspectUnit",
+    "SendWho",
+
+    -- WoW API: Guild management
+    "IsGuildLeader",
+    "CanGuildRemove",
+    "GuildPromote",
+    "GuildDemote",
+    "GuildUninvite",
+
+    -- WoW API: Dropdown menus
+    "UIDropDownMenu_CreateInfo",
+    "UIDropDownMenu_AddButton",
+    "UIDropDownMenu_Initialize",
+    "ToggleDropDownMenu",
+
+    -- WoW Global strings
+    "WHISPER_MESSAGE",
+    "PARTY_INVITE",
+    "INSPECT",
+    "GUILD_PROMOTE",
+    "GUILD_DEMOTE",
+    "GUILD_UNINVITE",
+    "WHO",
+    "CANCEL",
 
     -- WoW API: Miscellaneous
     "GetRealmName",

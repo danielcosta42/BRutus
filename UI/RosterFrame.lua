@@ -692,6 +692,7 @@ end
 ----------------------------------------------------------------------
 function CreateRosterRow(parent, rowIndex)
     local row = CreateFrame("Button", "BRutusRow" .. rowIndex, parent, "BackdropTemplate")
+    row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     row:SetHeight(ROW_HEIGHT)
     row:SetPoint("TOPLEFT", 0, -((rowIndex - 1) * ROW_HEIGHT))
     row:SetPoint("RIGHT", parent, "RIGHT", -18, 0)
@@ -819,9 +820,12 @@ function CreateRosterRow(parent, rowIndex)
         GameTooltip:Hide()
     end)
 
-    -- Click to show detail
-    row:SetScript("OnClick", function(self)
-        if self.memberData then
+    -- Click: left = detail, right = context menu
+    row:SetScript("OnClick", function(self, button)
+        if not self.memberData then return end
+        if button == "RightButton" then
+            BRutus:ShowMemberContextMenu(self, self.memberData)
+        else
             BRutus:ShowMemberDetail(self.memberData)
         end
     end)
@@ -942,6 +946,120 @@ function UpdateRosterRow(row, data, rowIndex)
 end
 
 ----------------------------------------------------------------------
+-- Right-click context menu (mimics default guild roster menu)
+----------------------------------------------------------------------
+local memberDropdown = CreateFrame("Frame", "BRutusMemberDropdown", UIParent, "UIDropDownMenuTemplate")
+
+local function MemberDropdown_Initialize(self, level)
+    local data = self.memberData
+    if not data then return end
+
+    local info = UIDropDownMenu_CreateInfo()
+    local myName = UnitName("player")
+    local isMe = (data.name == myName)
+
+    -- Header: player name
+    info.text = data.name
+    info.isTitle = true
+    info.notCheckable = true
+    UIDropDownMenu_AddButton(info, level)
+
+    info = UIDropDownMenu_CreateInfo()
+    info.notCheckable = true
+
+    -- Whisper
+    if not isMe and data.isOnline then
+        info.text = WHISPER_MESSAGE or "Whisper"
+        info.func = function()
+            ChatFrame_SendTell(data.name)
+        end
+        UIDropDownMenu_AddButton(info, level)
+    end
+
+    -- Invite to group
+    if not isMe and data.isOnline then
+        info = UIDropDownMenu_CreateInfo()
+        info.notCheckable = true
+        info.text = PARTY_INVITE or "Invite"
+        info.func = function()
+            InviteUnit(data.name)
+        end
+        UIDropDownMenu_AddButton(info, level)
+    end
+
+    -- Inspect (target must be nearby)
+    if not isMe and data.isOnline then
+        info = UIDropDownMenu_CreateInfo()
+        info.notCheckable = true
+        info.text = INSPECT or "Inspect"
+        info.func = function()
+            InspectUnit(data.name)
+        end
+        UIDropDownMenu_AddButton(info, level)
+    end
+
+    -- Guild promote (if we can)
+    if not isMe and IsGuildLeader and IsGuildLeader() then
+        info = UIDropDownMenu_CreateInfo()
+        info.notCheckable = true
+        info.text = GUILD_PROMOTE or "Promote"
+        info.func = function()
+            GuildPromote(data.name)
+        end
+        UIDropDownMenu_AddButton(info, level)
+
+        info = UIDropDownMenu_CreateInfo()
+        info.notCheckable = true
+        info.text = GUILD_DEMOTE or "Demote"
+        info.func = function()
+            GuildDemote(data.name)
+        end
+        UIDropDownMenu_AddButton(info, level)
+    end
+
+    -- Guild remove (if we can)
+    if not isMe and CanGuildRemove and CanGuildRemove() then
+        info = UIDropDownMenu_CreateInfo()
+        info.notCheckable = true
+        info.text = GUILD_UNINVITE or "Remove from guild"
+        info.func = function()
+            GuildUninvite(data.name)
+        end
+        UIDropDownMenu_AddButton(info, level)
+    end
+
+    -- Who
+    info = UIDropDownMenu_CreateInfo()
+    info.notCheckable = true
+    info.text = WHO or "Who"
+    info.func = function()
+        SendWho("n-" .. data.name)
+    end
+    UIDropDownMenu_AddButton(info, level)
+
+    -- View detail
+    info = UIDropDownMenu_CreateInfo()
+    info.notCheckable = true
+    info.text = "BRutus Detail"
+    info.func = function()
+        BRutus:ShowMemberDetail(data)
+    end
+    UIDropDownMenu_AddButton(info, level)
+
+    -- Cancel
+    info = UIDropDownMenu_CreateInfo()
+    info.notCheckable = true
+    info.text = CANCEL or "Cancel"
+    UIDropDownMenu_AddButton(info, level)
+end
+
+function BRutus:ShowMemberContextMenu(anchor, memberData)
+    memberDropdown.memberData = memberData
+    UIDropDownMenu_Initialize(memberDropdown, MemberDropdown_Initialize, "MENU")
+    ToggleDropDownMenu(1, nil, memberDropdown, "cursor", 3, -3)
+end
+
+----------------------------------------------------------------------
 -- Row tooltip (rich info on hover)
 ----------------------------------------------------------------------
 function ShowRowTooltip(row)
@@ -1042,7 +1160,8 @@ function ShowRowTooltip(row)
     end
 
     GameTooltip:AddLine(" ")
-    GameTooltip:AddLine("Click for detailed view", 0.5, 0.5, 0.5)
+    GameTooltip:AddLine("Left-click: detailed view", 0.5, 0.5, 0.5)
+    GameTooltip:AddLine("Right-click: whisper, invite, etc.", 0.5, 0.5, 0.5)
 
     GameTooltip:Show()
 end
