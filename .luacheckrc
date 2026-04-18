@@ -3,14 +3,41 @@
 std = "lua51"
 max_line_length = false
 
--- WoW global API and environment
+-- Globals that the addon WRITES to
 globals = {
-    -- Addon globals
+    -- Addon tables
     "BRutus",
     "BRutusDB",
 
-    -- WoW API frames and widgets
+    -- Slash commands
+    "SlashCmdList",
+    "SLASH_BRUTUS1",
+    "SLASH_BRUTUS2",
+
+    -- Hooked/overwritten globals
+    "ToggleGuildFrame",
+    "ToggleFriendsFrame",
+
+    -- Implicit globals defined across files (functions shared between modules)
+    "CreateRosterRow",
+    "UpdateRosterRow",
+    "ShowRowTooltip",
+    "CreateDetailFrame",
+    "PopulateDetail",
+    "CreateSectionHeader",
+    "CreateGearRow",
+    "CreateProfessionRow",
+    "CreateAttunementRow",
+
+    -- Tables written to
+    "UISpecialFrames",
+}
+
+-- Globals that the addon READS (WoW environment)
+read_globals = {
+    -- WoW API: Frames & UI
     "CreateFrame",
+    "CreateColor",
     "UIParent",
     "GameTooltip",
     "GameFontNormal",
@@ -19,69 +46,100 @@ globals = {
     "GameFontHighlightSmall",
     "GameFontNormalLarge",
     "ChatFontNormal",
-    "UISpecialFrames",
     "BackdropTemplateMixin",
     "STANDARD_TEXT_FONT",
     "DEFAULT_CHAT_FRAME",
-    "FACTION_BAR_COLORS",
-    "RAID_CLASS_COLORS",
 
-    -- WoW API functions
-    "SendChatMessage",
-    "SendAddonMessage",
-    "RegisterAddonMessagePrefix",
-    "C_GuildInfo",
+    -- WoW API: C_ namespaces
     "C_Timer",
+    "C_ChatInfo",
+    "C_GuildInfo",
+    "C_QuestLog",
+
+    -- WoW API: Unit functions
+    "UnitName",
+    "UnitClass",
+    "UnitLevel",
+    "UnitRace",
+    "UnitFactionGroup",
+    "UnitGUID",
+    "UnitHealthMax",
+    "UnitPowerMax",
+    "UnitStat",
+
+    -- WoW API: Guild functions
+    "IsInGuild",
+    "CanGuildInvite",
+    "GuildInvite",
+    "GetGuildInfo",
     "GetGuildRosterInfo",
     "GetNumGuildMembers",
-    "GuildRoster",
     "GetGuildRosterMOTD",
+    "GuildRoster",
+
+    -- WoW API: Inventory & Items
     "GetInventoryItemLink",
     "GetInventoryItemTexture",
     "GetInventoryItemQuality",
     "GetItemInfo",
     "GetItemQualityColor",
-    "IsInGuild",
-    "CanGuildInvite",
-    "GuildInvite",
-    "GetRealmName",
-    "UnitName",
-    "UnitClass",
-    "UnitRace",
-    "UnitLevel",
-    "UnitFactionGroup",
-    "UnitGUID",
     "GetAverageItemLevel",
-    "GetTime",
-    "GetServerTime",
+
+    -- WoW API: Skills & Professions
+    "GetNumSkillLines",
+    "GetSkillLineInfo",
+
+    -- WoW API: Quest & Reputation
     "GetQuestLogTitle",
     "GetNumQuestLogEntries",
     "GetQuestLogIndexByID",
     "IsQuestFlaggedCompleted",
-    "C_QuestLog",
     "GetFactionInfoByID",
+
+    -- WoW API: Chat & Communication
+    "SendChatMessage",
+    "SendAddonMessage",
+    "RegisterAddonMessagePrefix",
+    "GetChannelName",
+    "JoinChannelByName",
+    "EnumerateServerChannels",
+    "ChatFrame_AddMessageEventFilter",
+
+    -- WoW API: Miscellaneous
+    "GetRealmName",
+    "GetTime",
+    "GetServerTime",
+    "ReloadUI",
+    "InCombatLockdown",
     "PlaySound",
-    "SOUNDKIT",
     "hooksecurefunc",
     "securecallfunction",
     "StaticPopup_Show",
-    "StaticPopupDialogs",
-    "ToggleGuildFrame",
-    "ToggleFriendsFrame",
+
+    -- WoW API: Scroll frames
+    "FauxScrollFrame_Update",
+    "FauxScrollFrame_GetOffset",
+    "FauxScrollFrame_OnVerticalScroll",
+
+    -- WoW API: Frame management
     "GuildFrame",
     "FriendsFrame",
     "ShowUIPanel",
     "HideUIPanel",
     "InterfaceOptionsFrame_OpenToCategory",
 
-    -- WoW scroll frame API
-    "FauxScrollFrame_Update",
-    "FauxScrollFrame_GetOffset",
-    "FauxScrollFrame_OnVerticalScroll",
+    -- WoW Global constants & tables
+    "SOUNDKIT",
+    "CLASS_ICON_TCOORDS",
+    "FACTION_BAR_COLORS",
+    "RAID_CLASS_COLORS",
+    "ERR_GUILD_JOIN_S",
+    "StaticPopupDialogs",
 
-    -- String/Table
+    -- WoW Lua aliases (not in std lua51)
     "strsplit",
     "strtrim",
+    "strlower",
     "strjoin",
     "tinsert",
     "tremove",
@@ -98,28 +156,17 @@ globals = {
     "tContains",
     "CopyTable",
 
-    -- Slash commands
-    "SlashCmdList",
-    "SLASH_BRUTUS1",
-    "SLASH_BRUTUS2",
-    "hash_SlashCmdList",
-
-    -- Chat
-    "ChatFrame_AddMessageEventFilter",
-    "JoinChannelByName",
-    "GetChannelName",
-    "EnumerateServerChannels",
-
     -- Libraries
     "LibStub",
+    "ChatThrottleLib",
 }
 
--- Files in Libs/ are third-party and should not be linted
+-- Third-party libraries — skip
 exclude_files = {
     "Libs/**",
 }
 
--- Ignore unused self parameter (common in WoW event handlers)
+-- Ignore unused self (common in WoW callbacks/event handlers)
 ignore = {
     "212/self",
 }

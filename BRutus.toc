@@ -8,7 +8,7 @@
 ## X-License: MIT
 ## X-Category: Guild
 ## X-Website: https://github.com/danielcosta42/BRutus
-## X-Curse-Project-ID: CHANGEME
+## X-Curse-Project-ID: 1517832
 
 # Libraries
 Libs\LibStub.lua
