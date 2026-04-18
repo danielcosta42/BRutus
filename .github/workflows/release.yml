@@ -85,6 +85,12 @@ jobs:
           git tag -a "v${{ steps.version.outputs.next }}" -m "Release v${{ steps.version.outputs.next }}"
           git push origin "v${{ steps.version.outputs.next }}"
 
+      - name: Re-checkout tagged commit
+        uses: actions/checkout@v4
+        with:
+          ref: v${{ steps.version.outputs.next }}
+          fetch-depth: 0
+
       - name: Package and publish to CurseForge
         uses: BigWigsMods/packager@v2
         with:
