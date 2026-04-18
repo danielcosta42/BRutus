@@ -1050,7 +1050,7 @@ end
 ----------------------------------------------------------------------
 -- TMB (That's My BiS) Panel UI
 ----------------------------------------------------------------------
-function BRutus:CreateTMBPanel(parent, mainFrame)
+function BRutus:CreateTMBPanel(parent, _mainFrame)
     local expandedChar = nil  -- key of currently expanded character
 
     ----------------------------------------------------------------
@@ -1156,7 +1156,7 @@ function BRutus:CreateTMBPanel(parent, mainFrame)
     ----------------------------------------------------------------
     -- Helper: render item rows for a category
     ----------------------------------------------------------------
-    local function RenderItemRows(items, ly, childWidth, typeColor, prefix, showDate)
+    local function RenderItemRows(items, ly, childWidth, typeColor, _prefix, showDate)
         for _, item in ipairs(items) do
             local row = CreateFrame("Frame", nil, listChild, "BackdropTemplate")
             row:SetPoint("TOPLEFT", 20, ly)
