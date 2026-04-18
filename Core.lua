@@ -115,6 +115,12 @@ local DB_DEFAULTS = {
     },
     myData = {},
     lastSync = 0,
+    tmb = {
+        data = {},
+        itemNotes = {},
+        lastImport = 0,
+        importedBy = "",
+    },
 }
 
 ----------------------------------------------------------------------
@@ -185,6 +191,12 @@ function BRutus:OnLogin()
     if BRutus.Recruitment then
         BRutus.Recruitment:Initialize()
     end
+    if BRutus.TMB then
+        BRutus.TMB:Initialize()
+    end
+
+    -- Hook chat player links for guild invite
+    BRutus:HookChatInvite()
 
     -- Request guild roster
     if IsInGuild() then
@@ -376,4 +388,22 @@ function BRutus:TimeAgo(timestamp)
     elseif diff < 86400 then return math.floor(diff / 3600) .. "h ago"
     else return math.floor(diff / 86400) .. "d ago"
     end
+end
+
+----------------------------------------------------------------------
+-- Chat Player Link: Guild Invite
+-- Alt+Click a player name in chat to send a guild invite
+----------------------------------------------------------------------
+function BRutus:HookChatInvite()
+    hooksecurefunc("SetItemRef", function(link, _, button)
+        if not CanGuildInvite() then return end
+        if button ~= "LeftButton" or not IsAltKeyDown() then return end
+        if not link then return end
+
+        local name = link:match("^player:([^:]+)")
+        if name and name ~= "" then
+            GuildInvite(name)
+            BRutus:Print("Guild invite sent to " .. name .. ". (Alt+Click)")
+        end
+    end)
 end

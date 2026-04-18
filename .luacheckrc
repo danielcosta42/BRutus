@@ -156,6 +156,15 @@ read_globals = {
     "tContains",
     "CopyTable",
 
+    -- WoW API: Key modifiers
+    "IsAltKeyDown",
+    "SetItemRef",
+
+    -- Tooltip frames
+    "ItemRefTooltip",
+    "ShoppingTooltip1",
+    "ShoppingTooltip2",
+
     -- Libraries
     "LibStub",
     "ChatThrottleLib",

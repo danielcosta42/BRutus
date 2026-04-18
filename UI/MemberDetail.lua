@@ -274,6 +274,106 @@ function PopulateDetail(frame, data)
         yOff = yOff - 25
     end
 
+    ----------------------------------------------------------------
+    -- Section: TMB Loot (That's My BiS)
+    ----------------------------------------------------------------
+    local tmbData = BRutus.TMB and BRutus.TMB:GetCharacterData(data.name)
+    if tmbData then
+        yOff = yOff - 10
+        local tmbParts = {}
+        if #tmbData.prios > 0 then table.insert(tmbParts, #tmbData.prios .. " prio") end
+        if #tmbData.wishlists > 0 then table.insert(tmbParts, #tmbData.wishlists .. " wish") end
+        if #tmbData.received > 0 then table.insert(tmbParts, #tmbData.received .. " recv") end
+        local tmbHeader = "THAT'S MY BIS" .. (#tmbParts > 0 and ("  --  " .. table.concat(tmbParts, " / ")) or "")
+        yOff = CreateSectionHeader(child, tmbHeader, yOff, contentWidth)
+        yOff = yOff - 5
+
+        local TMBColors = BRutus.TMB.TypeColors
+
+        -- Prios
+        if #tmbData.prios > 0 then
+            local prioLabel = child:CreateFontString(nil, "OVERLAY")
+            prioLabel:SetFont("Fonts\\FRIZQT__.TTF", 9, "OUTLINE")
+            prioLabel:SetPoint("TOPLEFT", 10, yOff)
+            prioLabel:SetTextColor(TMBColors.prio.r, TMBColors.prio.g, TMBColors.prio.b)
+            prioLabel:SetText("PRIO:")
+            prioLabel:Show()
+            yOff = yOff - 14
+
+            for _, item in ipairs(tmbData.prios) do
+                local qColor = BRutus.QualityColors[BRutus.TMB:GetItemQuality(item.itemId)] or BRutus.QualityColors[1]
+                local itemStr = child:CreateFontString(nil, "OVERLAY")
+                itemStr:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
+                itemStr:SetPoint("TOPLEFT", 20, yOff)
+                itemStr:SetWidth(contentWidth - 30)
+                itemStr:SetJustifyH("LEFT")
+                itemStr:SetWordWrap(false)
+                local osStr = item.isOffspec and " |cffAAAAAA(OS)|r" or ""
+                itemStr:SetText(string.format("|cff%02x%02x%02x#%d %s|r%s",
+                    qColor.r * 255, qColor.g * 255, qColor.b * 255,
+                    item.order, BRutus.TMB:GetItemName(item.itemId), osStr))
+                itemStr:Show()
+                yOff = yOff - 15
+            end
+            yOff = yOff - 4
+        end
+
+        -- Wishlists
+        if #tmbData.wishlists > 0 then
+            local wishLabel = child:CreateFontString(nil, "OVERLAY")
+            wishLabel:SetFont("Fonts\\FRIZQT__.TTF", 9, "OUTLINE")
+            wishLabel:SetPoint("TOPLEFT", 10, yOff)
+            wishLabel:SetTextColor(TMBColors.wishlist.r, TMBColors.wishlist.g, TMBColors.wishlist.b)
+            wishLabel:SetText("WISHLIST:")
+            wishLabel:Show()
+            yOff = yOff - 14
+
+            for _, item in ipairs(tmbData.wishlists) do
+                local qColor = BRutus.QualityColors[BRutus.TMB:GetItemQuality(item.itemId)] or BRutus.QualityColors[1]
+                local itemStr = child:CreateFontString(nil, "OVERLAY")
+                itemStr:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
+                itemStr:SetPoint("TOPLEFT", 20, yOff)
+                itemStr:SetWidth(contentWidth - 30)
+                itemStr:SetJustifyH("LEFT")
+                itemStr:SetWordWrap(false)
+                local osStr = item.isOffspec and " |cffAAAAAA(OS)|r" or ""
+                itemStr:SetText(string.format("|cff%02x%02x%02x#%d %s|r%s",
+                    qColor.r * 255, qColor.g * 255, qColor.b * 255,
+                    item.order, BRutus.TMB:GetItemName(item.itemId), osStr))
+                itemStr:Show()
+                yOff = yOff - 15
+            end
+            yOff = yOff - 4
+        end
+
+        -- Received
+        if #tmbData.received > 0 then
+            local recvLabel = child:CreateFontString(nil, "OVERLAY")
+            recvLabel:SetFont("Fonts\\FRIZQT__.TTF", 9, "OUTLINE")
+            recvLabel:SetPoint("TOPLEFT", 10, yOff)
+            recvLabel:SetTextColor(TMBColors.received.r, TMBColors.received.g, TMBColors.received.b)
+            recvLabel:SetText("RECEIVED:")
+            recvLabel:Show()
+            yOff = yOff - 14
+
+            for _, item in ipairs(tmbData.received) do
+                local qColor = BRutus.QualityColors[BRutus.TMB:GetItemQuality(item.itemId)] or BRutus.QualityColors[1]
+                local itemStr = child:CreateFontString(nil, "OVERLAY")
+                itemStr:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
+                itemStr:SetPoint("TOPLEFT", 20, yOff)
+                itemStr:SetWidth(contentWidth - 30)
+                itemStr:SetJustifyH("LEFT")
+                itemStr:SetWordWrap(false)
+                local dateStr = item.receivedAt and item.receivedAt ~= "" and (" |cffAAAAAA" .. item.receivedAt .. "|r") or ""
+                itemStr:SetText(string.format("|cff%02x%02x%02x%s|r%s",
+                    qColor.r * 255, qColor.g * 255, qColor.b * 255,
+                    BRutus.TMB:GetItemName(item.itemId), dateStr))
+                itemStr:Show()
+                yOff = yOff - 15
+            end
+        end
+    end
+
     -- Update scroll child height
     child:SetHeight(math.abs(yOff) + 20)
 end
@@ -458,8 +558,8 @@ function CreateAttunementRow(parent, att, yOff, width)
         statusText:SetText("NOT STARTED")
     end
 
-    -- Progress bar (for in-progress attunements)
-    if att.questsTotal and att.questsTotal > 0 then
+    -- Progress bar (only for in-progress attunements, not completed ones)
+    if not att.complete and att.questsTotal and att.questsTotal > 0 then
         local progressBar = UI:CreateProgressBar(parent, width - 30, 5)
         progressBar:SetPoint("TOPLEFT", 10, yOff - 20)
         progressBar:SetProgress(att.progress or 0)

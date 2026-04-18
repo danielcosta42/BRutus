@@ -214,6 +214,7 @@ function BRutus.CreateRosterFrame()
 
     -- Create tabs
     CreateTab("roster", "Roster", false)
+    CreateTab("tmb", "TMB Loot", false)
     CreateTab("recruitment", "Recruitment", true)
 
     ----------------------------------------------------------------
@@ -400,6 +401,16 @@ function BRutus.CreateRosterFrame()
     BRutus:CreateRecruitmentPanel(recruitPanel, frame)
 
     ----------------------------------------------------------------
+    -- TMB LOOT PANEL
+    ----------------------------------------------------------------
+    local tmbPanel = CreateFrame("Frame", nil, frame)
+    tmbPanel:SetPoint("TOPLEFT", 0, contentTop)
+    tmbPanel:SetPoint("BOTTOMRIGHT", 0, 30)
+    tmbPanel:Hide()
+    frame.tabPanels["tmb"] = tmbPanel
+    BRutus:CreateTMBPanel(tmbPanel, frame)
+
+    ----------------------------------------------------------------
     -- Bottom Bar
     ----------------------------------------------------------------
     local bottomBar = CreateFrame("Frame", nil, frame)
@@ -417,7 +428,73 @@ function BRutus.CreateRosterFrame()
     bottomLine:SetPoint("BOTTOMRIGHT", 0, 30)
 
     local helpText = UI:CreateText(bottomBar, "/brutus scan  |  /brutus sync  |  /brutus reset", 9, 0.4, 0.4, 0.5)
-    helpText:SetPoint("CENTER")
+    helpText:SetPoint("LEFT", 12, 0)
+
+    -- Guild Invite (visible only if player can invite)
+    local inviteBox = CreateFrame("EditBox", nil, bottomBar, "BackdropTemplate")
+    inviteBox:SetSize(140, 22)
+    inviteBox:SetPoint("RIGHT", -90, 0)
+    inviteBox:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
+    inviteBox:SetBackdropColor(0.05, 0.05, 0.08, 1.0)
+    inviteBox:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.4)
+    inviteBox:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
+    inviteBox:SetTextColor(C.white.r, C.white.g, C.white.b)
+    inviteBox:SetTextInsets(6, 6, 0, 0)
+    inviteBox:SetAutoFocus(false)
+    inviteBox:SetMaxLetters(50)
+
+    local invitePlaceholder = inviteBox:CreateFontString(nil, "OVERLAY")
+    invitePlaceholder:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
+    invitePlaceholder:SetPoint("LEFT", 6, 0)
+    invitePlaceholder:SetTextColor(0.4, 0.4, 0.4)
+    invitePlaceholder:SetText("Player name...")
+
+    inviteBox:SetScript("OnTextChanged", function(self)
+        local text = self:GetText()
+        if text and text ~= "" then
+            invitePlaceholder:Hide()
+        else
+            invitePlaceholder:Show()
+        end
+    end)
+
+    local inviteBtn = UI:CreateButton(bottomBar, "Invite", 70, 22)
+    inviteBtn:SetPoint("RIGHT", -12, 0)
+
+    local function DoInvite()
+        local target = strtrim(inviteBox:GetText() or "")
+        if target == "" then
+            BRutus:Print("Enter a player name to invite.")
+            return
+        end
+        GuildInvite(target)
+        BRutus:Print("Guild invite sent to " .. target .. ".")
+        inviteBox:SetText("")
+        inviteBox:ClearFocus()
+    end
+
+    inviteBtn:SetScript("OnClick", DoInvite)
+    inviteBox:SetScript("OnEnterPressed", function(self)
+        DoInvite()
+        self:ClearFocus()
+    end)
+    inviteBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+
+    frame.inviteBox = inviteBox
+    frame.inviteBtn = inviteBtn
+
+    -- Show/hide invite based on permission
+    local function UpdateInviteVisibility()
+        if CanGuildInvite() then
+            inviteBox:Show()
+            inviteBtn:Show()
+        else
+            inviteBox:Hide()
+            inviteBtn:Hide()
+        end
+    end
+
+    frame:HookScript("OnShow", UpdateInviteVisibility)
 
     ----------------------------------------------------------------
     -- Data & Methods
@@ -929,10 +1006,650 @@ function ShowRowTooltip(row)
         GameTooltip:AddLine("Player does not have BRutus installed", C.red.r, C.red.g, C.red.b)
     end
 
+    -- TMB loot info
+    if BRutus.TMB then
+        local tmbData = BRutus.TMB:GetCharacterData(data.name)
+        if tmbData then
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine("That's My BiS:", C.gold.r, C.gold.g, C.gold.b)
+            local TMBColors = BRutus.TMB.TypeColors
+            if #tmbData.prios > 0 then
+                for _, item in ipairs(tmbData.prios) do
+                    local name = BRutus.TMB:GetItemName(item.itemId)
+                    local os = item.isOffspec and " (OS)" or ""
+                    GameTooltip:AddLine("  Prio #" .. item.order .. ": " .. name .. os,
+                        TMBColors.prio.r, TMBColors.prio.g, TMBColors.prio.b)
+                end
+            end
+            if #tmbData.wishlists > 0 then
+                local shown = math.min(#tmbData.wishlists, 5)
+                for j = 1, shown do
+                    local item = tmbData.wishlists[j]
+                    local name = BRutus.TMB:GetItemName(item.itemId)
+                    local os = item.isOffspec and " (OS)" or ""
+                    GameTooltip:AddLine("  Wish #" .. item.order .. ": " .. name .. os,
+                        TMBColors.wishlist.r, TMBColors.wishlist.g, TMBColors.wishlist.b)
+                end
+                if #tmbData.wishlists > 5 then
+                    GameTooltip:AddLine("  +" .. (#tmbData.wishlists - 5) .. " more...", 0.5, 0.5, 0.5)
+                end
+            end
+            if #tmbData.received > 0 then
+                GameTooltip:AddLine("  Received: " .. #tmbData.received .. " items",
+                    TMBColors.received.r, TMBColors.received.g, TMBColors.received.b)
+            end
+        end
+    end
+
     GameTooltip:AddLine(" ")
     GameTooltip:AddLine("Click for detailed view", 0.5, 0.5, 0.5)
 
     GameTooltip:Show()
+end
+
+----------------------------------------------------------------------
+-- TMB (That's My BiS) Panel UI
+----------------------------------------------------------------------
+function BRutus:CreateTMBPanel(parent, mainFrame)
+    local expandedChar = nil  -- key of currently expanded character
+
+    ----------------------------------------------------------------
+    -- Top bar: status + buttons
+    ----------------------------------------------------------------
+    local topBar = CreateFrame("Frame", nil, parent)
+    topBar:SetPoint("TOPLEFT", 15, -10)
+    topBar:SetPoint("TOPRIGHT", -15, -10)
+    topBar:SetHeight(30)
+
+    -- Status text (left)
+    local tmbStatusText = UI:CreateText(topBar, "", 11, C.white.r, C.white.g, C.white.b)
+    tmbStatusText:SetPoint("LEFT", 5, 0)
+    tmbStatusText:SetWidth(450)
+    tmbStatusText:SetJustifyH("LEFT")
+
+    -- Import button (right, officer only)
+    local importBtn = UI:CreateButton(topBar, "Import CSV", 100, 24)
+    importBtn:SetPoint("RIGHT", -110, 0)
+
+    -- Clear button (right, officer only)
+    local clearBtn = UI:CreateButton(topBar, "Clear Data", 100, 24)
+    clearBtn:SetPoint("RIGHT", -5, 0)
+
+    ----------------------------------------------------------------
+    -- Search bar
+    ----------------------------------------------------------------
+    local searchBar = CreateFrame("Frame", nil, parent)
+    searchBar:SetPoint("TOPLEFT", 15, -44)
+    searchBar:SetPoint("TOPRIGHT", -15, -44)
+    searchBar:SetHeight(26)
+
+    local searchIcon = searchBar:CreateFontString(nil, "OVERLAY")
+    searchIcon:SetFont("Fonts\\FRIZQT__.TTF", 12, "OUTLINE")
+    searchIcon:SetPoint("LEFT", 8, 0)
+    searchIcon:SetTextColor(C.silver.r, C.silver.g, C.silver.b, 0.5)
+    searchIcon:SetText("Search:")
+
+    local tmbSearch = CreateFrame("EditBox", nil, searchBar, "BackdropTemplate")
+    tmbSearch:SetSize(200, 22)
+    tmbSearch:SetPoint("LEFT", searchIcon, "RIGHT", 8, 0)
+    tmbSearch:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
+    tmbSearch:SetBackdropColor(0.05, 0.05, 0.08, 1.0)
+    tmbSearch:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.4)
+    tmbSearch:SetFont("Fonts\\FRIZQT__.TTF", 11, "OUTLINE")
+    tmbSearch:SetTextColor(C.white.r, C.white.g, C.white.b)
+    tmbSearch:SetTextInsets(6, 6, 0, 0)
+    tmbSearch:SetAutoFocus(false)
+    tmbSearch:SetMaxLetters(30)
+    tmbSearch:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+
+    local tmbSearchPlaceholder = tmbSearch:CreateFontString(nil, "OVERLAY")
+    tmbSearchPlaceholder:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
+    tmbSearchPlaceholder:SetPoint("LEFT", 6, 0)
+    tmbSearchPlaceholder:SetTextColor(0.4, 0.4, 0.4)
+    tmbSearchPlaceholder:SetText("Player name...")
+
+    -- Character count label (right of search)
+    local charCountText = UI:CreateText(searchBar, "", 10, C.silver.r, C.silver.g, C.silver.b)
+    charCountText:SetPoint("RIGHT", -5, 0)
+
+    ----------------------------------------------------------------
+    -- Column header
+    ----------------------------------------------------------------
+    local colHeader = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    colHeader:SetPoint("TOPLEFT", 15, -74)
+    colHeader:SetPoint("TOPRIGHT", -15, -74)
+    colHeader:SetHeight(20)
+    colHeader:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
+    colHeader:SetBackdropColor(C.headerBg.r, C.headerBg.g, C.headerBg.b, 0.8)
+
+    local hName = UI:CreateHeaderText(colHeader, "Character", 10)
+    hName:SetPoint("LEFT", 28, 0)
+    local hClass = UI:CreateHeaderText(colHeader, "Class", 10)
+    hClass:SetPoint("LEFT", 180, 0)
+    local hPrio = UI:CreateHeaderText(colHeader, "Prio", 10)
+    hPrio:SetPoint("LEFT", 310, 0)
+    local hWish = UI:CreateHeaderText(colHeader, "Wishlist", 10)
+    hWish:SetPoint("LEFT", 370, 0)
+    local hRecv = UI:CreateHeaderText(colHeader, "Received", 10)
+    hRecv:SetPoint("LEFT", 460, 0)
+
+    ----------------------------------------------------------------
+    -- Scrollable character list
+    ----------------------------------------------------------------
+    local listContainer = CreateFrame("Frame", nil, parent)
+    listContainer:SetPoint("TOPLEFT", 15, -94)
+    listContainer:SetPoint("BOTTOMRIGHT", -15, 5)
+
+    local listScroll = CreateFrame("ScrollFrame", "BRutusTMBListScroll", listContainer, "UIPanelScrollFrameTemplate")
+    listScroll:SetPoint("TOPLEFT", 0, 0)
+    listScroll:SetPoint("BOTTOMRIGHT", -20, 0)
+
+    local listChild = CreateFrame("Frame", "BRutusTMBListChild", listScroll)
+    listChild:SetWidth(listContainer:GetWidth() or 720)
+    listChild:SetHeight(1)
+    listScroll:SetScrollChild(listChild)
+
+    listContainer:SetScript("OnSizeChanged", function(self)
+        listChild:SetWidth(self:GetWidth() - 24)
+    end)
+
+    ----------------------------------------------------------------
+    -- Helper: render item rows for a category
+    ----------------------------------------------------------------
+    local function RenderItemRows(items, ly, childWidth, typeColor, prefix, showDate)
+        for _, item in ipairs(items) do
+            local row = CreateFrame("Frame", nil, listChild, "BackdropTemplate")
+            row:SetPoint("TOPLEFT", 20, ly)
+            row:SetSize(childWidth - 30, 18)
+            row:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
+            row:SetBackdropColor(0.06, 0.06, 0.10, 0.6)
+            row:Show()
+
+            -- Type color bar
+            local colorBar = row:CreateTexture(nil, "ARTWORK")
+            colorBar:SetPoint("TOPLEFT", 0, 0)
+            colorBar:SetPoint("BOTTOMLEFT", 0, 0)
+            colorBar:SetWidth(3)
+            colorBar:SetTexture("Interface\\Buttons\\WHITE8x8")
+            colorBar:SetVertexColor(typeColor.r, typeColor.g, typeColor.b, 0.9)
+
+            -- Order number
+            local orderStr = row:CreateFontString(nil, "OVERLAY")
+            orderStr:SetFont("Fonts\\FRIZQT__.TTF", 9, "OUTLINE")
+            orderStr:SetPoint("LEFT", 8, 0)
+            orderStr:SetWidth(22)
+            orderStr:SetJustifyH("RIGHT")
+            orderStr:SetTextColor(typeColor.r, typeColor.g, typeColor.b, 0.7)
+            if showDate then
+                orderStr:SetText("")
+            else
+                orderStr:SetText("#" .. item.order)
+            end
+
+            -- Item name with quality color
+            local qColor = BRutus.QualityColors[BRutus.TMB:GetItemQuality(item.itemId)] or BRutus.QualityColors[1]
+            local nameText = BRutus.TMB:GetItemName(item.itemId)
+
+            local itemStr = row:CreateFontString(nil, "OVERLAY")
+            itemStr:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
+            itemStr:SetPoint("LEFT", 34, 0)
+            itemStr:SetWidth(childWidth - 140)
+            itemStr:SetJustifyH("LEFT")
+            itemStr:SetWordWrap(false)
+            itemStr:SetTextColor(qColor.r, qColor.g, qColor.b)
+            itemStr:SetText(nameText)
+
+            -- Badges (right side)
+            local badgeX = -8
+            if item.isOffspec then
+                local osBadge = row:CreateFontString(nil, "OVERLAY")
+                osBadge:SetFont("Fonts\\FRIZQT__.TTF", 8, "OUTLINE")
+                osBadge:SetPoint("RIGHT", badgeX, 0)
+                osBadge:SetTextColor(0.7, 0.7, 0.7, 0.7)
+                osBadge:SetText("OS")
+                badgeX = badgeX - 22
+            end
+
+            if item.tierLabel and item.tierLabel ~= "" then
+                local tierBadge = row:CreateFontString(nil, "OVERLAY")
+                tierBadge:SetFont("Fonts\\FRIZQT__.TTF", 8, "OUTLINE")
+                tierBadge:SetPoint("RIGHT", badgeX, 0)
+                tierBadge:SetTextColor(C.gold.r, C.gold.g, C.gold.b, 0.6)
+                tierBadge:SetText(item.tierLabel)
+                badgeX = badgeX - 40
+            end
+
+            if showDate and item.receivedAt and item.receivedAt ~= "" then
+                local dateBadge = row:CreateFontString(nil, "OVERLAY")
+                dateBadge:SetFont("Fonts\\FRIZQT__.TTF", 8, "")
+                dateBadge:SetPoint("RIGHT", badgeX, 0)
+                dateBadge:SetTextColor(0.5, 0.5, 0.5)
+                dateBadge:SetText(item.receivedAt)
+            end
+
+            -- Tooltip on hover (item link)
+            row:EnableMouse(true)
+            row:SetScript("OnEnter", function(self)
+                self:SetBackdropColor(0.12, 0.10, 0.18, 0.8)
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:SetHyperlink("item:" .. item.itemId)
+                GameTooltip:Show()
+            end)
+            row:SetScript("OnLeave", function(self)
+                self:SetBackdropColor(0.06, 0.06, 0.10, 0.6)
+                GameTooltip:Hide()
+            end)
+
+            ly = ly - 20
+        end
+        return ly
+    end
+
+    ----------------------------------------------------------------
+    -- Populate character list
+    ----------------------------------------------------------------
+    local function PopulateTMBList(filter)
+        -- Clear previous
+        local children = { listChild:GetChildren() }
+        for _, ch in ipairs(children) do ch:Hide() end
+        local regions = { listChild:GetRegions() }
+        for _, rg in ipairs(regions) do rg:Hide() end
+
+        local tmb = BRutus.db.tmb
+        if not tmb or not tmb.data then return end
+
+        local childWidth = listChild:GetWidth()
+        if childWidth < 100 then childWidth = 720 end
+        local ly = -2
+        local count = 0
+        local totalCount = 0
+
+        -- Sort character names
+        local sortedNames = {}
+        for key, charData in pairs(tmb.data) do
+            totalCount = totalCount + 1
+            if not filter or filter == "" or strlower(charData.name):find(strlower(filter), 1, true) then
+                table.insert(sortedNames, { key = key, data = charData })
+            end
+        end
+        table.sort(sortedNames, function(a, b) return a.data.name < b.data.name end)
+
+        for _, entry in ipairs(sortedNames) do
+            local charData = entry.data
+            local charKey = entry.key
+            local isExpanded = expandedChar == charKey
+            count = count + 1
+
+            -- Alternating row bg
+            local rowBg = (count % 2 == 0) and C.row2 or C.row1
+
+            -- Character row (clickable)
+            local charRow = CreateFrame("Button", nil, listChild, "BackdropTemplate")
+            charRow:SetPoint("TOPLEFT", 0, ly)
+            charRow:SetSize(childWidth, 24)
+            charRow:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
+            charRow:SetBackdropColor(rowBg.r, rowBg.g, rowBg.b, rowBg.a)
+            charRow:Show()
+
+            -- Expand/collapse indicator
+            local arrow = charRow:CreateFontString(nil, "OVERLAY")
+            arrow:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
+            arrow:SetPoint("LEFT", 8, 0)
+            arrow:SetTextColor(C.silver.r, C.silver.g, C.silver.b, 0.6)
+            arrow:SetText(isExpanded and "v" or ">")
+
+            -- Character name (class colored)
+            local cc = BRutus.ClassColors[charData.class:upper()] or C.white
+            local nameStr = charRow:CreateFontString(nil, "OVERLAY")
+            nameStr:SetFont("Fonts\\FRIZQT__.TTF", 11, "OUTLINE")
+            nameStr:SetPoint("LEFT", 24, 0)
+            nameStr:SetTextColor(cc.r, cc.g, cc.b)
+            local displayName = charData.name
+            if charData.isAlt then
+                displayName = displayName .. " |cff666666[ALT]|r"
+            end
+            nameStr:SetText(displayName)
+
+            -- Class label
+            local classStr = charRow:CreateFontString(nil, "OVERLAY")
+            classStr:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
+            classStr:SetPoint("LEFT", 180, 0)
+            classStr:SetTextColor(cc.r, cc.g, cc.b, 0.7)
+            classStr:SetText(charData.class or "")
+
+            -- Prio count
+            local prioCount = charRow:CreateFontString(nil, "OVERLAY")
+            prioCount:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
+            prioCount:SetPoint("LEFT", 310, 0)
+            prioCount:SetWidth(40)
+            if #charData.prios > 0 then
+                prioCount:SetTextColor(BRutus.TMB.TypeColors.prio.r, BRutus.TMB.TypeColors.prio.g, BRutus.TMB.TypeColors.prio.b)
+                prioCount:SetText(tostring(#charData.prios))
+            else
+                prioCount:SetTextColor(0.3, 0.3, 0.3)
+                prioCount:SetText("-")
+            end
+
+            -- Wish count
+            local wishCount = charRow:CreateFontString(nil, "OVERLAY")
+            wishCount:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
+            wishCount:SetPoint("LEFT", 370, 0)
+            wishCount:SetWidth(60)
+            if #charData.wishlists > 0 then
+                wishCount:SetTextColor(BRutus.TMB.TypeColors.wishlist.r, BRutus.TMB.TypeColors.wishlist.g, BRutus.TMB.TypeColors.wishlist.b)
+                wishCount:SetText(tostring(#charData.wishlists))
+            else
+                wishCount:SetTextColor(0.3, 0.3, 0.3)
+                wishCount:SetText("-")
+            end
+
+            -- Recv count
+            local recvCount = charRow:CreateFontString(nil, "OVERLAY")
+            recvCount:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
+            recvCount:SetPoint("LEFT", 460, 0)
+            recvCount:SetWidth(50)
+            if #charData.received > 0 then
+                recvCount:SetTextColor(BRutus.TMB.TypeColors.received.r, BRutus.TMB.TypeColors.received.g, BRutus.TMB.TypeColors.received.b)
+                recvCount:SetText(tostring(#charData.received))
+            else
+                recvCount:SetTextColor(0.3, 0.3, 0.3)
+                recvCount:SetText("-")
+            end
+
+            -- Hover
+            charRow:SetScript("OnEnter", function(self)
+                self:SetBackdropColor(C.rowHover.r, C.rowHover.g, C.rowHover.b, C.rowHover.a)
+            end)
+            charRow:SetScript("OnLeave", function(self)
+                self:SetBackdropColor(rowBg.r, rowBg.g, rowBg.b, rowBg.a)
+            end)
+
+            -- Click to expand/collapse
+            charRow:SetScript("OnClick", function()
+                if expandedChar == charKey then
+                    expandedChar = nil
+                else
+                    expandedChar = charKey
+                end
+                PopulateTMBList(tmbSearch:GetText())
+            end)
+
+            ly = ly - 26
+
+            --------------------------------------------------------
+            -- Expanded detail area
+            --------------------------------------------------------
+            if isExpanded then
+                local detailBg = CreateFrame("Frame", nil, listChild, "BackdropTemplate")
+                detailBg:SetPoint("TOPLEFT", 0, ly)
+                detailBg:SetSize(childWidth, 1) -- height set dynamically
+                detailBg:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
+                detailBg:SetBackdropColor(0.07, 0.06, 0.11, 0.9)
+                detailBg:Show()
+
+                local detailLy = -6
+
+                -- Prio section
+                if #charData.prios > 0 then
+                    local secLabel = listChild:CreateFontString(nil, "OVERLAY")
+                    secLabel:SetFont("Fonts\\FRIZQT__.TTF", 9, "OUTLINE")
+                    secLabel:SetPoint("TOPLEFT", 10, ly + detailLy)
+                    secLabel:SetTextColor(BRutus.TMB.TypeColors.prio.r, BRutus.TMB.TypeColors.prio.g, BRutus.TMB.TypeColors.prio.b)
+                    secLabel:SetText("PRIO  (" .. #charData.prios .. ")")
+                    secLabel:Show()
+                    detailLy = detailLy - 16
+
+                    local newLy = RenderItemRows(charData.prios, ly + detailLy, childWidth, BRutus.TMB.TypeColors.prio, "#", false)
+                    detailLy = newLy - ly
+                    detailLy = detailLy - 6
+                end
+
+                -- Wishlist section
+                if #charData.wishlists > 0 then
+                    local secLabel = listChild:CreateFontString(nil, "OVERLAY")
+                    secLabel:SetFont("Fonts\\FRIZQT__.TTF", 9, "OUTLINE")
+                    secLabel:SetPoint("TOPLEFT", 10, ly + detailLy)
+                    secLabel:SetTextColor(BRutus.TMB.TypeColors.wishlist.r, BRutus.TMB.TypeColors.wishlist.g, BRutus.TMB.TypeColors.wishlist.b)
+                    secLabel:SetText("WISHLIST  (" .. #charData.wishlists .. ")")
+                    secLabel:Show()
+                    detailLy = detailLy - 16
+
+                    local newLy = RenderItemRows(charData.wishlists, ly + detailLy, childWidth, BRutus.TMB.TypeColors.wishlist, "#", false)
+                    detailLy = newLy - ly
+                    detailLy = detailLy - 6
+                end
+
+                -- Received section
+                if #charData.received > 0 then
+                    local secLabel = listChild:CreateFontString(nil, "OVERLAY")
+                    secLabel:SetFont("Fonts\\FRIZQT__.TTF", 9, "OUTLINE")
+                    secLabel:SetPoint("TOPLEFT", 10, ly + detailLy)
+                    secLabel:SetTextColor(BRutus.TMB.TypeColors.received.r, BRutus.TMB.TypeColors.received.g, BRutus.TMB.TypeColors.received.b)
+                    secLabel:SetText("RECEIVED  (" .. #charData.received .. ")")
+                    secLabel:Show()
+                    detailLy = detailLy - 16
+
+                    local newLy = RenderItemRows(charData.received, ly + detailLy, childWidth, BRutus.TMB.TypeColors.received, "", true)
+                    detailLy = newLy - ly
+                    detailLy = detailLy - 6
+                end
+
+                -- Note
+                if charData.note and charData.note ~= "" then
+                    local noteStr = listChild:CreateFontString(nil, "OVERLAY")
+                    noteStr:SetFont("Fonts\\FRIZQT__.TTF", 9, "")
+                    noteStr:SetPoint("TOPLEFT", 10, ly + detailLy)
+                    noteStr:SetWidth(childWidth - 30)
+                    noteStr:SetJustifyH("LEFT")
+                    noteStr:SetTextColor(C.silver.r, C.silver.g, C.silver.b, 0.6)
+                    noteStr:SetText("Note: " .. charData.note)
+                    noteStr:Show()
+                    detailLy = detailLy - 16
+                end
+
+                local detailHeight = math.abs(detailLy) + 4
+                detailBg:SetHeight(detailHeight)
+                ly = ly - detailHeight - 2
+            end
+        end
+
+        if count == 0 and totalCount == 0 then
+            local noData = listChild:CreateFontString(nil, "OVERLAY")
+            noData:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
+            noData:SetPoint("TOP", listChild, "TOP", 0, ly - 30)
+            noData:SetTextColor(C.silver.r, C.silver.g, C.silver.b, 0.5)
+            noData:SetText("No TMB data imported yet.\nUse the Import CSV button to paste data from thatsmybis.com.")
+            noData:SetJustifyH("CENTER")
+            noData:Show()
+            ly = ly - 60
+        elseif count == 0 then
+            local noMatch = listChild:CreateFontString(nil, "OVERLAY")
+            noMatch:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
+            noMatch:SetPoint("TOP", listChild, "TOP", 0, ly - 20)
+            noMatch:SetTextColor(C.silver.r, C.silver.g, C.silver.b, 0.5)
+            noMatch:SetText("No characters match the search.")
+            noMatch:SetJustifyH("CENTER")
+            noMatch:Show()
+            ly = ly - 40
+        end
+
+        charCountText:SetText(count .. " / " .. totalCount .. " characters")
+        listChild:SetHeight(math.abs(ly) + 20)
+    end
+
+    ----------------------------------------------------------------
+    -- Import Modal
+    ----------------------------------------------------------------
+    local modal = CreateFrame("Frame", "BRutusTMBImportModal", UIParent, "BackdropTemplate")
+    modal:SetSize(550, 380)
+    modal:SetPoint("CENTER")
+    modal:SetFrameStrata("DIALOG")
+    modal:SetFrameLevel(100)
+    modal:SetBackdrop({
+        bgFile   = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = 2,
+    })
+    modal:SetBackdropColor(0.06, 0.06, 0.10, 0.97)
+    modal:SetBackdropBorderColor(C.accent.r, C.accent.g, C.accent.b, 0.8)
+    modal:EnableMouse(true)
+    modal:SetMovable(true)
+    modal:RegisterForDrag("LeftButton")
+    modal:SetScript("OnDragStart", modal.StartMoving)
+    modal:SetScript("OnDragStop", modal.StopMovingOrSizing)
+    modal:Hide()
+
+    -- Dim background
+    local dimBg = modal:CreateTexture(nil, "BACKGROUND", nil, -8)
+    dimBg:SetTexture("Interface\\Buttons\\WHITE8x8")
+    dimBg:SetVertexColor(0, 0, 0, 0.5)
+    dimBg:SetPoint("TOPLEFT", UIParent, "TOPLEFT")
+    dimBg:SetPoint("BOTTOMRIGHT", UIParent, "BOTTOMRIGHT")
+
+    -- Modal title
+    local modalTitle = UI:CreateTitle(modal, "Import TMB Data", 14)
+    modalTitle:SetPoint("TOPLEFT", 18, -14)
+
+    -- Close button
+    local modalClose = UI:CreateCloseButton(modal)
+    modalClose:SetPoint("TOPRIGHT", -6, -6)
+    modalClose:SetScript("OnClick", function() modal:Hide() end)
+
+    -- Instructions
+    local modalInfo = UI:CreateText(modal, "Paste the CSV export from thatsmybis.com below.\nExport > Character Loot (CSV) or any TMB CSV format.", 10, 0.6, 0.55, 0.5)
+    modalInfo:SetPoint("TOPLEFT", 18, -40)
+    modalInfo:SetWidth(500)
+
+    -- Edit box container
+    local editContainer = CreateFrame("Frame", nil, modal, "BackdropTemplate")
+    editContainer:SetPoint("TOPLEFT", 18, -80)
+    editContainer:SetPoint("BOTTOMRIGHT", -18, 64)
+    editContainer:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
+    editContainer:SetBackdropColor(0.03, 0.03, 0.06, 1.0)
+    editContainer:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.3)
+
+    local editScroll = CreateFrame("ScrollFrame", "BRutusTMBModalScroll", editContainer, "UIPanelScrollFrameTemplate")
+    editScroll:SetPoint("TOPLEFT", 6, -6)
+    editScroll:SetPoint("BOTTOMRIGHT", -24, 6)
+
+    local importBox = CreateFrame("EditBox", "BRutusTMBModalEditBox", editScroll)
+    importBox:SetMultiLine(true)
+    importBox:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
+    importBox:SetTextColor(C.white.r, C.white.g, C.white.b)
+    importBox:SetWidth(490)
+    importBox:SetAutoFocus(false)
+    importBox:SetMaxLetters(0)
+    importBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    editScroll:SetScrollChild(importBox)
+
+    -- Placeholder text
+    local editPlaceholder = importBox:CreateFontString(nil, "OVERLAY")
+    editPlaceholder:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
+    editPlaceholder:SetPoint("TOPLEFT", 2, -2)
+    editPlaceholder:SetTextColor(0.3, 0.3, 0.3)
+    editPlaceholder:SetText("type,raid_group_name,member_name,character_name...")
+    importBox:SetScript("OnTextChanged", function(self)
+        if self:GetText() ~= "" then editPlaceholder:Hide() else editPlaceholder:Show() end
+    end)
+
+    -- Bottom buttons
+    local modalImportBtn = UI:CreateButton(modal, "Import", 120, 28)
+    modalImportBtn:SetPoint("BOTTOMLEFT", 18, 18)
+
+    local modalResultText = UI:CreateText(modal, "", 10, C.white.r, C.white.g, C.white.b)
+    modalResultText:SetPoint("LEFT", modalImportBtn, "RIGHT", 14, 0)
+    modalResultText:SetWidth(350)
+
+    local modalCancelBtn = UI:CreateButton(modal, "Cancel", 80, 28)
+    modalCancelBtn:SetPoint("BOTTOMRIGHT", -18, 18)
+    modalCancelBtn:SetScript("OnClick", function() modal:Hide() end)
+
+    modalImportBtn:SetScript("OnClick", function()
+        if not BRutus:IsOfficer() then
+            modalResultText:SetText("|cffFF4444Only officers can import.|r")
+            return
+        end
+        local csvText = importBox:GetText()
+        local ok, msg = BRutus.TMB:ImportCSV(csvText)
+        if ok then
+            modalResultText:SetText("|cff4CFF4C" .. msg .. "|r")
+            BRutus:Print("|cff4CFF4C" .. msg .. "|r")
+            importBox:SetText("")
+            importBox:ClearFocus()
+            -- Auto-close after success and refresh
+            C_Timer.After(1.5, function()
+                modal:Hide()
+                if parent:IsShown() then
+                    parent:GetScript("OnShow")(parent)
+                end
+            end)
+        else
+            modalResultText:SetText("|cffFF4444" .. msg .. "|r")
+        end
+    end)
+
+    -- Wire top bar buttons
+    importBtn:SetScript("OnClick", function()
+        modalResultText:SetText("")
+        importBox:SetText("")
+        editPlaceholder:Show()
+        modal:Show()
+    end)
+
+    clearBtn:SetScript("OnClick", function()
+        if not BRutus:IsOfficer() then
+            BRutus:Print("Only officers can clear TMB data.")
+            return
+        end
+        BRutus.db.tmb.data = {}
+        BRutus.db.tmb.itemNotes = {}
+        BRutus.db.tmb.lastImport = 0
+        BRutus.db.tmb.importedBy = ""
+        expandedChar = nil
+        BRutus:Print("TMB data cleared.")
+        if parent:IsShown() then
+            parent:GetScript("OnShow")(parent)
+        end
+    end)
+
+    -- Search handler
+    tmbSearch:SetScript("OnTextChanged", function(self)
+        local text = self:GetText()
+        if text and text ~= "" then
+            tmbSearchPlaceholder:Hide()
+        else
+            tmbSearchPlaceholder:Show()
+        end
+        PopulateTMBList(text)
+    end)
+    tmbSearch:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+
+    ----------------------------------------------------------------
+    -- OnShow: refresh
+    ----------------------------------------------------------------
+    parent:SetScript("OnShow", function()
+        local tmb = BRutus.db.tmb
+        if tmb and tmb.lastImport > 0 then
+            local timeStr = BRutus:TimeAgo(tmb.lastImport)
+            local charTotal = 0
+            for _ in pairs(tmb.data or {}) do charTotal = charTotal + 1 end
+            tmbStatusText:SetText(string.format("|cff4CFF4CLoaded|r  |cffAAAAAA—|r  %d characters  |cffAAAAAA—|r  %s by %s",
+                charTotal, timeStr, tmb.importedBy or "unknown"))
+        else
+            tmbStatusText:SetText("|cffFF4444No TMB data imported|r")
+        end
+
+        -- Show/hide officer buttons
+        if BRutus:IsOfficer() then
+            importBtn:Show()
+            clearBtn:Show()
+        else
+            importBtn:Hide()
+            clearBtn:Hide()
+        end
+
+        PopulateTMBList(tmbSearch:GetText())
+    end)
 end
 
 ----------------------------------------------------------------------

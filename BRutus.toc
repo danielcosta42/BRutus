@@ -25,6 +25,7 @@ DataCollector.lua
 AttunementTracker.lua
 CommSystem.lua
 RecruitmentSystem.lua
+TMBIntegration.lua
 
 # UI
 UI\Helpers.lua

@@ -163,6 +163,10 @@ function CommSystem:OnMessageReceived(msg, _, sender)
         self:HandlePing(sender)
     elseif msgType == CommSystem.MSG_TYPES.VERSION then
         self:HandleVersionCheck(sender, data)
+    elseif msgType == "TM" then
+        if BRutus.TMB then
+            BRutus.TMB:HandleTMBData(data)
+        end
     end
 end
 
