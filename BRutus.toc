@@ -1,0 +1,28 @@
+## Interface: 20504
+## Title: |cffFFD700BRutus|r |cff888888Guild Manager|r
+## Notes: Premium Guild Roster & Member Inspector for TBC Anniversary
+## Author: BRutus Guild
+## Version: 1.0.0
+## SavedVariables: BRutusDB
+## DefaultState: enabled
+
+# Libraries
+Libs\LibStub.lua
+Libs\CallbackHandler-1.0.lua
+Libs\LibSerialize.lua
+Libs\LibDeflate.lua
+Libs\ChatThrottleLib.lua
+
+# Core
+Core.lua
+
+# Data Modules
+DataCollector.lua
+AttunementTracker.lua
+CommSystem.lua
+RecruitmentSystem.lua
+
+# UI
+UI\Helpers.lua
+UI\RosterFrame.lua
+UI\MemberDetail.lua

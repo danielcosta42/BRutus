@@ -1,0 +1,278 @@
+----------------------------------------------------------------------
+-- BRutus Guild Manager - Attunement Tracker
+-- Tracks TBC raid attunements via quest completion checks
+----------------------------------------------------------------------
+local AttunementTracker = {}
+BRutus.AttunementTracker = AttunementTracker
+
+----------------------------------------------------------------------
+-- TBC Attunement Data
+-- Quest IDs for attunement chains
+----------------------------------------------------------------------
+AttunementTracker.ATTUNEMENTS = {
+    {
+        name = "Karazhan",
+        short = "Kara",
+        icon = "Interface\\Icons\\INV_Misc_Key_07",
+        tier = "T4",
+        quests = {
+            { id = 9824,  name = "Arcane Disturbances" },
+            { id = 9825,  name = "Restless Activity" },
+            { id = 9826,  name = "Contact from Dalaran" },
+            { id = 9829,  name = "Khadgar" },
+            { id = 9831,  name = "Entry Into Karazhan" },
+            { id = 9832,  name = "The Second and Third Fragments" },
+            { id = 9836,  name = "The Master's Touch" },
+            { id = 9837,  name = "Return to Khadgar" },
+            { id = 9838,  name = "The Violet Eye" },
+        },
+        finalQuestId = 9838,
+    },
+    {
+        name = "Gruul's Lair",
+        short = "Gruul",
+        icon = "Interface\\Icons\\INV_Misc_MonsterClaw_04",
+        tier = "T4",
+        quests = {},
+        finalQuestId = nil,
+        note = "No attunement required",
+        alwaysComplete = true,
+    },
+    {
+        name = "Magtheridon's Lair",
+        short = "Mag",
+        icon = "Interface\\Icons\\Spell_Fire_FelFlameRing",
+        tier = "T4",
+        quests = {},
+        finalQuestId = nil,
+        note = "No attunement required",
+        alwaysComplete = true,
+    },
+    {
+        name = "Serpentshrine Cavern",
+        short = "SSC",
+        icon = "Interface\\Icons\\INV_Misc_MonsterScales_17",
+        tier = "T5",
+        quests = {
+            { id = 10901, name = "The Mark of Vashj" },
+        },
+        finalQuestId = 10901,
+        note = "Removed in patch 2.1.0 - Tracking for reference",
+    },
+    {
+        name = "Tempest Keep: The Eye",
+        short = "TK",
+        icon = "Interface\\Icons\\INV_Misc_Gem_NetherDragonEye",
+        tier = "T5",
+        quests = {
+            { id = 10888, name = "Trial of the Naaru: Mercy" },
+            { id = 10889, name = "Trial of the Naaru: Strength" },
+            { id = 10890, name = "Trial of the Naaru: Tenacity" },
+            { id = 10901, name = "Trial of the Naaru: Magtheridon" },
+        },
+        finalQuestId = 10901,
+        note = "Removed in patch 2.1.0 - Tracking for reference",
+    },
+    {
+        name = "Hyjal Summit",
+        short = "Hyjal",
+        icon = "Interface\\Icons\\INV_Misc_Branch_01",
+        tier = "T6",
+        quests = {
+            { id = 10445, name = "The Vials of Eternity" },
+        },
+        finalQuestId = 10445,
+        note = "Removed in patch 2.1.0 - Tracking for reference",
+    },
+    {
+        name = "Black Temple",
+        short = "BT",
+        icon = "Interface\\Icons\\INV_Weapon_Glaive_01",
+        tier = "T6",
+        quests = {
+            { id = 10563, name = "Tablets of Baa'ri" },
+            { id = 10564, name = "Oronu the Elder" },
+            { id = 10565, name = "The Ashtongue Corruptors" },
+            { id = 10567, name = "The Warden's Cage" },
+            { id = 10568, name = "Proof of Allegiance" },
+            { id = 10570, name = "Akama" },
+            { id = 10575, name = "Seer Udalo" },
+            { id = 10576, name = "A Mysterious Portent" },
+            { id = 10577, name = "The Ata'mal Terrace" },
+            { id = 10578, name = "Akama's Promise" },
+            { id = 10944, name = "The Secret Compromised" },
+            { id = 10946, name = "Ruse of the Ashtongue" },
+            { id = 10947, name = "An Artifact From the Past" },
+            { id = 10948, name = "The Hostage Soul" },
+            { id = 10949, name = "Entry Into the Black Temple" },
+            { id = 10985, name = "A Distraction for Akama" },
+        },
+        finalQuestId = 10985,
+    },
+    {
+        name = "Sunwell Plateau",
+        short = "SWP",
+        icon = "Interface\\Icons\\Spell_Holy_SummonLightwell",
+        tier = "T6.5",
+        quests = {},
+        finalQuestId = nil,
+        note = "No attunement required",
+        alwaysComplete = true,
+    },
+}
+
+-- Heroic Key Quest IDs
+AttunementTracker.HEROIC_KEYS = {
+    {
+        name = "Hellfire Citadel (Honor Hold/Thrallmar)",
+        short = "HC: HFC",
+        faction = "both",
+        repFaction = { alliance = "Honor Hold", horde = "Thrallmar" },
+        repRequired = "Revered",
+    },
+    {
+        name = "Coilfang Reservoir (Cenarion Expedition)",
+        short = "HC: CF",
+        repFaction = "Cenarion Expedition",
+        repRequired = "Revered",
+    },
+    {
+        name = "Auchindoun (Lower City)",
+        short = "HC: Auch",
+        repFaction = "Lower City",
+        repRequired = "Revered",
+    },
+    {
+        name = "Tempest Keep (The Sha'tar)",
+        short = "HC: TK",
+        repFaction = "The Sha'tar",
+        repRequired = "Revered",
+    },
+    {
+        name = "Caverns of Time (Keepers of Time)",
+        short = "HC: CoT",
+        repFaction = "Keepers of Time",
+        repRequired = "Revered",
+    },
+}
+
+function AttunementTracker:Initialize()
+    local frame = CreateFrame("Frame")
+    frame:RegisterEvent("QUEST_TURNED_IN")
+    frame:RegisterEvent("QUEST_LOG_UPDATE")
+    frame:SetScript("OnEvent", function(_, event, ...)
+        if event == "QUEST_TURNED_IN" then
+            C_Timer.After(1, function() AttunementTracker:ScanAttunements() end)
+        end
+    end)
+end
+
+----------------------------------------------------------------------
+-- Scan all attunement progress
+----------------------------------------------------------------------
+function AttunementTracker:ScanAttunements()
+    local attunements = {}
+
+    -- Check raid attunements
+    for _, attunement in ipairs(self.ATTUNEMENTS) do
+        local entry = {
+            name = attunement.name,
+            short = attunement.short,
+            tier = attunement.tier,
+            icon = attunement.icon,
+        }
+
+        if attunement.alwaysComplete then
+            entry.complete = true
+            entry.progress = 1.0
+            entry.questsDone = 0
+            entry.questsTotal = 0
+        else
+            local done = 0
+            local total = #attunement.quests
+            local questStatus = {}
+
+            for _, quest in ipairs(attunement.quests) do
+                local isComplete = self:IsQuestComplete(quest.id)
+                questStatus[quest.id] = isComplete
+                if isComplete then
+                    done = done + 1
+                end
+            end
+
+            entry.complete = attunement.finalQuestId and questStatus[attunement.finalQuestId] or false
+            entry.progress = total > 0 and (done / total) or 0
+            entry.questsDone = done
+            entry.questsTotal = total
+            entry.questStatus = questStatus
+        end
+
+        table.insert(attunements, entry)
+    end
+
+    -- Store in player data
+    local name = UnitName("player")
+    local realm = GetRealmName()
+    local key = BRutus:GetPlayerKey(name, realm)
+
+    if BRutus.db.members[key] then
+        BRutus.db.members[key].attunements = attunements
+    end
+    if BRutus.db.myData then
+        BRutus.db.myData.attunements = attunements
+    end
+
+    return attunements
+end
+
+----------------------------------------------------------------------
+-- Check if a quest is completed
+----------------------------------------------------------------------
+function AttunementTracker:IsQuestComplete(questId)
+    -- Use C_QuestLog if available (TBC Classic may have it)
+    if C_QuestLog and C_QuestLog.IsQuestFlaggedCompleted then
+        return C_QuestLog.IsQuestFlaggedCompleted(questId)
+    end
+    -- Fallback
+    if IsQuestFlaggedCompleted then
+        return IsQuestFlaggedCompleted(questId)
+    end
+    return false
+end
+
+----------------------------------------------------------------------
+-- Get compact summary for the roster column (e.g. "3/8")
+----------------------------------------------------------------------
+function AttunementTracker:GetAttunementSummary(playerKey)
+    local data = BRutus.db.members[playerKey]
+    if not data or not data.attunements then
+        return "No data"
+    end
+
+    local total = #data.attunements
+    local done = 0
+    local inProgress = 0
+    for _, att in ipairs(data.attunements) do
+        if att.complete then
+            done = done + 1
+        elseif att.progress > 0 then
+            inProgress = inProgress + 1
+        end
+    end
+
+    local color
+    if done == total then
+        color = BRutus.Colors.green
+    elseif done > 0 or inProgress > 0 then
+        color = BRutus.Colors.gold
+    else
+        color = BRutus.Colors.red
+    end
+
+    local label = done .. "/" .. total
+    if done == total then
+        label = label .. " ✓"
+    end
+
+    return BRutus:ColorText(label, color.r, color.g, color.b)
+end
