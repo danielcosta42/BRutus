@@ -1150,7 +1150,7 @@ local function MemberDropdown_Initialize(self, level)
     UIDropDownMenu_AddButton(info, level)
 end
 
-function BRutus:ShowMemberContextMenu(anchor, memberData)
+function BRutus:ShowMemberContextMenu(_anchor, memberData)
     memberDropdown.memberData = memberData
     UIDropDownMenu_Initialize(memberDropdown, MemberDropdown_Initialize, "MENU")
     ToggleDropDownMenu(1, nil, memberDropdown, "cursor", 3, -3)
