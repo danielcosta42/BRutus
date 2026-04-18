@@ -234,7 +234,7 @@ function Recruitment:ShowSendPopup()
     -- Update channel list in label
     local channels = BRutus.db.recruitment.channels
     local chText = table.concat(channels, ", ")
-    self.popupFrame.label:SetText("Click to recruit! → " .. chText)
+    self.popupFrame.label:SetText("Click to recruit!  >>  " .. chText)
     self.popupFrame:Show()
 
     -- Auto-hide after 30s if not clicked

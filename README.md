@@ -1,17 +1,17 @@
 # ![BRutus](https://img.shields.io/badge/BRutus-Guild%20Manager-blueviolet?style=for-the-badge) 
 
-### Premium Guild Roster & Member Inspector for WoW TBC Anniversary
+### Premium Guild Management Addon for WoW TBC Anniversary
 
-BRutus replaces the default guild frame with a modern, feature-rich roster that automatically collects and shares gear, professions, attunements, and stats across your guild — no inspection required.
+BRutus replaces the default guild frame with a modern, feature-rich management hub that automatically collects and shares gear, professions, attunements, TMB wishlists, raid attendance, loot history and stats across your guild — no inspection required.
 
-> **Client:** WoW TBC Anniversary (Interface 20504)
+> **Client:** WoW TBC Anniversary (Interface 20505)
 
 ---
 
 ## Features
 
 ### Guild Roster
-- **Full guild roster** with sortable columns: Name, Level, Class, Race, Item Level, Professions, Attunements, Last Seen
+- **Full guild roster** with sortable columns: Name, Level, Class, Race, Item Level, Professions, Attunements, Attendance%, Last Seen
 - **Search** by name, class, zone or rank
 - **Online/Offline toggle** with offline members shown in grayscale
 - **Hover tooltips** with detailed character info
@@ -40,6 +40,38 @@ Tracks quest-based attunement progress for all TBC raids:
 
 Also tracks Heroic dungeon key reputation requirements (Honor Hold/Thrallmar, Cenarion Expedition, Lower City, Sha'tar, Keepers of Time).
 
+### TMB Integration (That's My BiS)
+- Import TMB CSV exports with wishlist, prio, and received loot data
+- Tooltip integration — hover any item to see who has it on their wishlist
+- Syncs imported TMB data between officers via addon comms
+- Dedicated TMB Loot tab for browsing all imported data
+
+### Raid Tracker
+- Automatically detects when you enter a raid and tracks full sessions (start/end, boss encounters, player snapshots)
+- Attendance scoring with penalty system: 100% base, −10% arrived late, −10% left early, −10% missing consumables
+- View recent sessions and per-member attendance in the Raids tab
+
+### Consumable Checker
+- Scans all raid members for expected TBC consumable buffs
+- Checks 5 categories: Flask, Food, Weapon Buff, Battle Elixir, Guardian Elixir
+- Reports which categories each player is missing
+- Integrates with attendance scoring
+
+### Loot Tracker
+- Automatically records every Rare+ item looted in raids and dungeons
+- Stores item link, recipient, timestamp, raid name, and quantity
+- Browse full loot history in the Loot tab
+- Keeps up to 500 entries
+
+### Officer Notes
+- Write private notes and apply quick-tags (Role, Priority, Status) per guild member
+- Notes are synced between officers in real time via addon comms
+
+### Trial Tracker (Officer Only)
+- Track trial/recruit members with configurable trial periods (default 30 days)
+- Records start date, sponsor, status (trial/approved/denied/expired), and evaluation notes
+- Auto-expires overdue trials and alerts officers
+
 ### Guild-Wide Data Sync
 - Automatically shares your gear, professions, attunements and stats with guildmates who have BRutus
 - Compressed and chunked communication protocol (LibSerialize + LibDeflate)
@@ -54,8 +86,14 @@ Also tracks Heroic dungeon key reputation requirements (Honor Hold/Thrallmar, Ce
 - Full configuration UI in the Recruitment tab: message, interval, channels, welcome text, Discord link
 
 ### Tab System
-- **Roster tab** — visible to all guild members
-- **Recruitment tab** — visible to officers and GM only
+| Tab | Access |
+|---|---|
+| Roster | All members |
+| TMB Loot | All members |
+| Raids | All members |
+| Loot | All members |
+| Trials | Officers only |
+| Recruitment | Officers only |
 
 ### Guild Frame Hook
 Pressing **J** (or however you open the guild frame) opens BRutus instead of the default Blizzard guild panel.
