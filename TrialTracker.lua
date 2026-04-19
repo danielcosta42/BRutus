@@ -44,6 +44,7 @@ function TrialTracker:AddTrial(playerKey, sponsor)
     self:TakeSnapshot(playerKey)
 
     BRutus:Print(playerKey .. " marcado como trial por " .. (sponsor or UnitName("player")))
+    self:BroadcastTrials()
     return true
 end
 
@@ -57,6 +58,7 @@ function TrialTracker:UpdateStatus(playerKey, newStatus)
         trial.resolvedDate = GetServerTime()
         trial.resolvedBy = UnitName("player")
     end
+    self:BroadcastTrials()
 end
 
 function TrialTracker:AddTrialNote(playerKey, text)
@@ -69,6 +71,7 @@ function TrialTracker:AddTrialNote(playerKey, text)
         author = UnitName("player"),
         timestamp = GetServerTime(),
     })
+    self:BroadcastTrials()
 end
 
 function TrialTracker:GetTrial(playerKey)
@@ -129,6 +132,7 @@ end
 
 function TrialTracker:RemoveTrial(playerKey)
     BRutus.db.trials[playerKey] = nil
+    self:BroadcastTrials()
 end
 
 ----------------------------------------------------------------------
@@ -221,4 +225,108 @@ function TrialTracker:UpdateSnapshots()
             end
         end
     end
+end
+
+----------------------------------------------------------------------
+-- Trial Sync — broadcast and receive trial data between officers
+----------------------------------------------------------------------
+function TrialTracker:BroadcastTrials()
+    if not BRutus:IsOfficer() then return end
+    if not BRutus.CommSystem then return end
+    if not IsInGuild() then return end
+
+    local trials = BRutus.db.trials
+    if not trials or not next(trials) then return end
+
+    local LibSerialize = LibStub("LibSerialize")
+    local serialized = LibSerialize:Serialize(trials)
+    BRutus.CommSystem:SendMessage("TR", serialized)
+end
+
+function TrialTracker:HandleIncoming(data)
+    if not BRutus:IsOfficer() then return end
+
+    local LibSerialize = LibStub("LibSerialize")
+    local ok, incomingTrials = LibSerialize:Deserialize(data)
+    if not ok or type(incomingTrials) ~= "table" then return end
+
+    if not BRutus.db.trials then BRutus.db.trials = {} end
+
+    for playerKey, incoming in pairs(incomingTrials) do
+        local existing = BRutus.db.trials[playerKey]
+        if not existing then
+            -- We don't have this trial at all — accept it
+            BRutus.db.trials[playerKey] = incoming
+        else
+            -- Merge: keep the one with more recent activity
+            -- Compare by most recent note timestamp, resolvedDate, or startDate
+            local incomingTime = incoming.startDate or 0
+            local existingTime = existing.startDate or 0
+
+            -- Check latest note
+            if incoming.notes and #incoming.notes > 0 then
+                local lastNote = incoming.notes[#incoming.notes]
+                if lastNote.timestamp and lastNote.timestamp > incomingTime then
+                    incomingTime = lastNote.timestamp
+                end
+            end
+            if existing.notes and #existing.notes > 0 then
+                local lastNote = existing.notes[#existing.notes]
+                if lastNote.timestamp and lastNote.timestamp > existingTime then
+                    existingTime = lastNote.timestamp
+                end
+            end
+
+            -- Check resolved date
+            if incoming.resolvedDate and incoming.resolvedDate > incomingTime then
+                incomingTime = incoming.resolvedDate
+            end
+            if existing.resolvedDate and existing.resolvedDate > existingTime then
+                existingTime = existing.resolvedDate
+            end
+
+            if incomingTime > existingTime then
+                -- Incoming is more recent — replace
+                BRutus.db.trials[playerKey] = incoming
+            elseif incomingTime == existingTime then
+                -- Same base — merge notes we don't have
+                self:MergeNotes(existing, incoming)
+                -- Keep more snapshots
+                if incoming.snapshots and existing.snapshots and #incoming.snapshots > #existing.snapshots then
+                    existing.snapshots = incoming.snapshots
+                end
+            end
+            -- If existingTime > incomingTime, we already have newer data — skip
+        end
+    end
+
+    -- Refresh UI if open
+    if BRutus.RosterFrame and BRutus.RosterFrame:IsShown() then
+        BRutus.RosterFrame:RefreshRoster()
+    end
+end
+
+-- Merge notes from incoming into existing, avoiding duplicates
+function TrialTracker:MergeNotes(existing, incoming)
+    if not incoming.notes or #incoming.notes == 0 then return end
+    if not existing.notes then existing.notes = {} end
+
+    -- Build a set of existing note signatures (author+timestamp)
+    local seen = {}
+    for _, note in ipairs(existing.notes) do
+        seen[(note.author or "") .. ":" .. (note.timestamp or 0)] = true
+    end
+
+    for _, note in ipairs(incoming.notes) do
+        local sig = (note.author or "") .. ":" .. (note.timestamp or 0)
+        if not seen[sig] then
+            table.insert(existing.notes, note)
+            seen[sig] = true
+        end
+    end
+
+    -- Re-sort notes by timestamp
+    table.sort(existing.notes, function(a, b)
+        return (a.timestamp or 0) < (b.timestamp or 0)
+    end)
 end

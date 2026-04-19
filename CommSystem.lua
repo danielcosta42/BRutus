@@ -36,6 +36,12 @@ function CommSystem:Initialize()
     C_Timer.NewTicker(300, function()
         if IsInGuild() then
             CommSystem:BroadcastMyData()
+            -- Officers also re-broadcast trial data periodically
+            if BRutus:IsOfficer() and BRutus.TrialTracker then
+                C_Timer.After(5, function()
+                    BRutus.TrialTracker:BroadcastTrials()
+                end)
+            end
         end
     end)
 
@@ -175,6 +181,10 @@ function CommSystem:OnMessageReceived(msg, _, sender)
         if BRutus.RecipeTracker then
             BRutus.RecipeTracker:HandleIncoming(sender, data)
         end
+    elseif msgType == "TR" then
+        if BRutus.TrialTracker then
+            BRutus.TrialTracker:HandleIncoming(data)
+        end
     end
 end
 
@@ -236,6 +246,13 @@ function CommSystem:HandleRequest(sender, _data)
         local myData = BRutus.DataCollector:GetBroadcastData()
         local serialized = LibSerialize:Serialize(myData)
         self:SendMessage(self.MSG_TYPES.RESPONSE, serialized, sender)
+
+        -- Officers also send trial data
+        if BRutus:IsOfficer() and BRutus.TrialTracker then
+            C_Timer.After(1, function()
+                BRutus.TrialTracker:BroadcastTrials()
+            end)
+        end
     end)
 end
 

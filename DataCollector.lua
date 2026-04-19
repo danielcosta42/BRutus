@@ -14,7 +14,15 @@ function DataCollector:Initialize()
     frame:RegisterEvent("CHAT_MSG_SKILL")
     frame:SetScript("OnEvent", function(_, event)
         if event == "PLAYER_EQUIPMENT_CHANGED" then
-            C_Timer.After(0.5, function() DataCollector:CollectMyData() end)
+            C_Timer.After(0.5, function()
+                DataCollector:CollectMyData()
+                -- Broadcast updated gear to guild after a short delay
+                C_Timer.After(2, function()
+                    if BRutus.CommSystem then
+                        BRutus.CommSystem:BroadcastMyData()
+                    end
+                end)
+            end)
         elseif event == "SKILL_LINES_CHANGED" or event == "CHAT_MSG_SKILL" then
             C_Timer.After(1, function() DataCollector:CollectProfessions() end)
         end
@@ -302,14 +310,38 @@ function DataCollector:StoreReceivedData(playerKey, data)
     if not data or type(data) ~= "table" then return end
     if not data.name or not data.class then return end
 
-    -- Merge with existing data
+    -- Timestamp check: skip if incoming data is older than what we have
     local existing = BRutus.db.members[playerKey] or {}
+    if existing.lastUpdate and data.lastUpdate and data.lastUpdate < existing.lastUpdate then
+        return
+    end
+
+    -- Merge with existing data (skip recipes, handled separately)
     for k, v in pairs(data) do
-        existing[k] = v
+        if k ~= "recipes" then
+            existing[k] = v
+        end
     end
     existing.lastSync = time()
 
     BRutus.db.members[playerKey] = existing
+
+    -- Store recipes if included in broadcast
+    if data.recipes then
+        if not BRutusDB.recipes then BRutusDB.recipes = {} end
+        if not BRutusDB.recipes[playerKey] then BRutusDB.recipes[playerKey] = {} end
+        local DC = BRutus.DataCollector
+        for profName, recipes in pairs(data.recipes) do
+            local canonical = DC and DC.GetCanonicalProfName and DC:GetCanonicalProfName(profName) or profName
+            -- Remove old localized keys that map to the same canonical profession
+            for oldKey, _ in pairs(BRutusDB.recipes[playerKey]) do
+                if oldKey ~= canonical and DC and DC.GetCanonicalProfName and DC:GetCanonicalProfName(oldKey) == canonical then
+                    BRutusDB.recipes[playerKey][oldKey] = nil
+                end
+            end
+            BRutusDB.recipes[playerKey][canonical] = recipes
+        end
+    end
 
     -- Update trial snapshots if this player is a trial
     if BRutus.TrialTracker then
@@ -370,6 +402,12 @@ function DataCollector:GetBroadcastData()
     -- Include attunements
     if myData.attunements then
         clean.attunements = myData.attunements
+    end
+
+    -- Include recipes (keyed by profession)
+    local myKey = BRutus:GetPlayerKey(myData.name, myData.realm or GetRealmName())
+    if BRutusDB.recipes and BRutusDB.recipes[myKey] then
+        clean.recipes = BRutusDB.recipes[myKey]
     end
 
     return clean
