@@ -206,6 +206,7 @@ read_globals = {
     "FACTION_BAR_COLORS",
     "RAID_CLASS_COLORS",
     "ERR_GUILD_JOIN_S",
+    "ERR_GUILD_INVITE_S",
     "StaticPopupDialogs",
 
     -- WoW Lua aliases (not in std lua51)

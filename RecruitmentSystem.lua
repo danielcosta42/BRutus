@@ -408,30 +408,50 @@ end
 -- Welcome message for new guild members
 ----------------------------------------------------------------------
 function Recruitment:RegisterWelcomeEvent()
+    -- Track players we personally invited
+    self.pendingInvites = {}
+
     local frame = CreateFrame("Frame")
     frame:RegisterEvent("CHAT_MSG_SYSTEM")
     frame:SetScript("OnEvent", function(_, event, msg)
         if event ~= "CHAT_MSG_SYSTEM" then return end
-        if not BRutus.db.recruitment.welcomeEnabled then return end
         if not IsInGuild() then return end
 
-        -- Detect "PlayerName has joined the guild." pattern
-        -- ERR_GUILD_JOIN_S = "%s has joined the guild."
+        -- Track outgoing invites: "%s has been invited to the guild."
+        -- ERR_GUILD_INVITE_S = "%s has been invited to the guild."
+        local invitePattern = ERR_GUILD_INVITE_S and ERR_GUILD_INVITE_S:gsub("%%s", "(.+)") or "(.+) has been invited to the guild%."
+        local invitedName = msg:match(invitePattern)
+        if invitedName then
+            Recruitment.pendingInvites[invitedName] = time()
+            -- Clean up after 5 minutes (in case they never join)
+            C_Timer.After(300, function()
+                Recruitment.pendingInvites[invitedName] = nil
+            end)
+            return
+        end
+
+        -- Detect "PlayerName has joined the guild." — only welcome if WE invited them
+        if not BRutus.db.recruitment.welcomeEnabled then return end
+
         local joinPattern = ERR_GUILD_JOIN_S and ERR_GUILD_JOIN_S:gsub("%%s", "(.+)") or "(.+) has joined the guild%."
         local newMember = msg:match(joinPattern)
         if not newMember then return end
+
+        -- Only send welcome if we were the one who invited this player
+        if not Recruitment.pendingInvites[newMember] then return end
+        Recruitment.pendingInvites[newMember] = nil
 
         -- Don't welcome ourselves
         local myName = UnitName("player")
         if newMember == myName then return end
 
-        -- Send welcome whisper after a short delay
+        -- Send welcome in guild chat after a short delay
         C_Timer.After(3, function()
             local settings = BRutus.db.recruitment
             local welcomeMsg = settings.welcomeMessage
             if welcomeMsg and welcomeMsg ~= "" then
-                SendChatMessage(welcomeMsg, "WHISPER", nil, newMember)
-                BRutus:Print("Welcome message sent to |cffFFFFFF" .. newMember .. "|r.")
+                SendChatMessage(welcomeMsg, "GUILD")
+                BRutus:Print("Welcome message sent for |cffFFFFFF" .. newMember .. "|r in guild chat.")
             end
         end)
     end)
