@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.10.0] - 2026-04-19
+
+### Added
+- enhance trial data broadcasting and handling for officers
+
+
 ## [1.9.0] - 2026-04-19
 
 ### Added
