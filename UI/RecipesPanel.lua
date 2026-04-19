@@ -328,10 +328,16 @@ function BRutus:CreateRecipesPanel(parent, _mainFrame)
         -- Hover helpers (prevent flicker when mouse moves to whisper button)
         local function RowEnter(self)
             self:SetBackdropColor(C.rowHover.r, C.rowHover.g, C.rowHover.b, C.rowHover.a)
-            if self.data and self.data.itemId then
-                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:SetItemByID(self.data.itemId)
-                GameTooltip:Show()
+            if self.data then
+                if self.data.itemId then
+                    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                    GameTooltip:SetItemByID(self.data.itemId)
+                    GameTooltip:Show()
+                elseif self.data.spellId then
+                    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                    GameTooltip:SetHyperlink("enchant:" .. self.data.spellId)
+                    GameTooltip:Show()
+                end
             end
             if self.firstOnlineCrafter then
                 self.whisperBtn:Show()

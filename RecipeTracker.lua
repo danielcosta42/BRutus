@@ -40,75 +40,64 @@ function RecipeTracker:Initialize()
 end
 
 ----------------------------------------------------------------------
--- Propagate spellIds across players within the same locale.
--- If ANY player has a recipe with spellId + name "Enchant X",
--- ALL other players with name "Enchant X" (same profession) get
--- that spellId. This fixes old data that was stored without IDs.
+-- Clean stored recipe data: enrich where possible, purge the rest.
+-- Recipes without spellId AND without itemId are old locale-dependent
+-- data that cause cross-locale duplication. After enrichment attempts,
+-- any remaining ID-less entries are removed. The data will be
+-- repopulated with proper IDs on the next scan or sync.
 ----------------------------------------------------------------------
 function RecipeTracker:EnrichStoredRecipes()
-    -- Phase 1: Build name→spellId per profession from ALL recipes that have spellId.
-    -- Includes BOTH the original recipe.name (sender's locale) and the locally
-    -- resolved name from GetSpellInfo (our locale). This enables cross-locale matching
-    -- when at least one player per locale has the spellId.
+    -- Phase 1: Build name→spellId per profession from ALL recipes that have spellId
     local profLookup = {} -- profName → { lowerName → spellId }
-    local profItemLookup = {} -- profName → { lowerName → itemId }
 
     for _, professions in pairs(BRutusDB.recipes or {}) do
         for profName, recipes in pairs(professions) do
             if not profLookup[profName] then profLookup[profName] = {} end
-            if not profItemLookup[profName] then profItemLookup[profName] = {} end
             for _, r in ipairs(recipes) do
                 if r.spellId then
-                    -- Register original sender name (could be any locale)
                     if r.name then
                         profLookup[profName][strlower(r.name)] = r.spellId
                     end
-                    -- Register local client name (from GetSpellInfo)
                     local localName = GetSpellInfo(r.spellId)
                     if localName and localName ~= "" then
                         profLookup[profName][strlower(localName)] = r.spellId
                     end
                 end
-                if r.itemId and r.name then
-                    profItemLookup[profName][strlower(r.name)] = r.itemId
-                    local localName = GetItemInfo(r.itemId)
-                    if localName and localName ~= "" then
-                        profItemLookup[profName][strlower(localName)] = r.itemId
-                    end
-                end
             end
         end
     end
 
-    -- Phase 2: Enrich recipes without spellId/itemId
-    local count = 0
+    -- Phase 2: Enrich where possible, then purge remaining ID-less entries
+    local enriched = 0
+    local purged = 0
     for _, professions in pairs(BRutusDB.recipes or {}) do
         for profName, recipes in pairs(professions) do
-            local sLookup = profLookup[profName]
-            local iLookup = profItemLookup[profName]
-            if sLookup then
-                for _, r in ipairs(recipes) do
-                    if not r.spellId and r.name then
-                        local sid = sLookup[strlower(r.name)]
-                        if sid then
-                            r.spellId = sid
-                            count = count + 1
-                        end
+            local lookup = profLookup[profName]
+            -- Reverse iterate so we can remove in-place
+            for i = #recipes, 1, -1 do
+                local r = recipes[i]
+                -- Try to enrich first
+                if not r.spellId and r.name and lookup then
+                    local sid = lookup[strlower(r.name)]
+                    if sid then
+                        r.spellId = sid
+                        enriched = enriched + 1
                     end
-                    if not r.itemId and r.name and iLookup then
-                        local iid = iLookup[strlower(r.name)]
-                        if iid then
-                            r.itemId = iid
-                            count = count + 1
-                        end
-                    end
+                end
+                -- Purge if still no ID
+                if not r.spellId and not r.itemId then
+                    table.remove(recipes, i)
+                    purged = purged + 1
                 end
             end
         end
     end
 
-    if count > 0 then
-        BRutus:Print(format("|cff00ff00Recipe data upgraded:|r enriched %d recipes with IDs.", count))
+    if enriched > 0 then
+        BRutus:Print(format("|cff00ff00Recipes:|r enriched %d entries with IDs.", enriched))
+    end
+    if purged > 0 then
+        BRutus:Print(format("|cffFFD700Recipes:|r purged %d old entries without IDs. They will be restored on next scan/sync.", purged))
     end
 end
 
