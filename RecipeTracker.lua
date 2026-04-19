@@ -30,6 +30,9 @@ function RecipeTracker:Initialize()
     if not BRutusDB.recipes then
         BRutusDB.recipes = {}
     end
+
+    -- Hook tooltips to show crafters
+    self:HookTooltips()
 end
 
 local SCAN_COOLDOWN = 5 -- seconds between scans of the same type
@@ -370,4 +373,118 @@ function RecipeTracker:GetOnlineSet()
         end
     end
     return set
+end
+
+----------------------------------------------------------------------
+-- Build a cached itemId → crafters lookup from recipe data
+----------------------------------------------------------------------
+function RecipeTracker:BuildItemCrafterIndex()
+    local index = {}
+    local DC = BRutus.DataCollector
+    for playerKey, professions in pairs(BRutusDB.recipes or {}) do
+        local playerName = playerKey:match("^([^-]+)") or playerKey
+        for profName, recipes in pairs(professions) do
+            local canonical = DC and DC.GetCanonicalProfName and DC:GetCanonicalProfName(profName) or profName
+            for _, recipe in ipairs(recipes) do
+                if recipe.itemId then
+                    if not index[recipe.itemId] then
+                        index[recipe.itemId] = {}
+                    end
+                    local found = false
+                    for _, c in ipairs(index[recipe.itemId]) do
+                        if c.playerKey == playerKey then found = true break end
+                    end
+                    if not found then
+                        local memberData = BRutus.db and BRutus.db.members and BRutus.db.members[playerKey]
+                        table.insert(index[recipe.itemId], {
+                            playerKey = playerKey,
+                            playerName = playerName,
+                            class = memberData and memberData.class,
+                            profName = canonical,
+                        })
+                    end
+                end
+            end
+        end
+    end
+    self._itemCrafterIndex = index
+    self._itemCrafterIndexTime = GetTime()
+    return index
+end
+
+function RecipeTracker:GetCraftersForItem(itemId)
+    if not itemId then return nil end
+    -- Rebuild cache every 30 seconds
+    if not self._itemCrafterIndex or not self._itemCrafterIndexTime
+       or (GetTime() - self._itemCrafterIndexTime) > 30 then
+        self:BuildItemCrafterIndex()
+    end
+    local crafters = self._itemCrafterIndex[itemId]
+    if not crafters or #crafters == 0 then return nil end
+    return crafters
+end
+
+----------------------------------------------------------------------
+-- Hook GameTooltip to show crafters for items
+----------------------------------------------------------------------
+function RecipeTracker:HookTooltips()
+    local C = BRutus.Colors
+    local onlineSet
+
+    local function OnTooltipSetItem(tooltip)
+        if not BRutusDB.recipes then return end
+
+        local _, link = tooltip:GetItem()
+        if not link then return end
+
+        local itemId = tonumber(link:match("item:(%d+)"))
+        if not itemId then return end
+
+        local crafters = RecipeTracker:GetCraftersForItem(itemId)
+        if not crafters then return end
+
+        -- Refresh online set (cached per tooltip show)
+        if not onlineSet then
+            onlineSet = RecipeTracker:GetOnlineSet()
+        end
+
+        -- Sort: online first, then alphabetical
+        local sorted = {}
+        for _, c in ipairs(crafters) do
+            table.insert(sorted, c)
+        end
+        table.sort(sorted, function(a, b)
+            local aOn = onlineSet[a.playerName] and 1 or 0
+            local bOn = onlineSet[b.playerName] and 1 or 0
+            if aOn ~= bOn then return aOn > bOn end
+            return a.playerName < b.playerName
+        end)
+
+        tooltip:AddLine(" ")
+        tooltip:AddLine("Fabricado por:", C.accent.r, C.accent.g, C.accent.b)
+        for _, c in ipairs(sorted) do
+            local cc = c.class and BRutus.ClassColors[c.class] or C.white
+            local status = onlineSet[c.playerName] and " |cff00ff00(online)|r" or " |cff666666(offline)|r"
+            tooltip:AddDoubleLine("  " .. c.playerName .. status, c.profName, cc.r, cc.g, cc.b, 0.6, 0.6, 0.6)
+        end
+
+        tooltip:Show()
+    end
+
+    -- Clear online cache when tooltip hides
+    GameTooltip:HookScript("OnTooltipCleared", function()
+        onlineSet = nil
+    end)
+
+    GameTooltip:HookScript("OnTooltipSetItem", OnTooltipSetItem)
+
+    if ItemRefTooltip then
+        ItemRefTooltip:HookScript("OnTooltipSetItem", OnTooltipSetItem)
+    end
+    if ShoppingTooltip1 then
+        ShoppingTooltip1:HookScript("OnTooltipSetItem", OnTooltipSetItem)
+    end
+    if ShoppingTooltip2 then
+        ShoppingTooltip2:HookScript("OnTooltipSetItem", OnTooltipSetItem)
+    end
 end
