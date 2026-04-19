@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.8.0] - 2026-04-19
+
+### Added
+- group crafters in recipe index and update online status display
+
+
 ## [1.7.0] - 2026-04-19
 
 ### Added
