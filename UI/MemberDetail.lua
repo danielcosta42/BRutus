@@ -629,24 +629,6 @@ end
 -- Create a gear slot row (with enchant & gem display)
 ----------------------------------------------------------------------
 
--- Slots that should have an enchant in TBC
-local ENCHANTABLE_SLOTS = {
-    [1] = true,   -- Head (glyph)
-    [3] = true,   -- Shoulder (inscription)
-    [5] = true,   -- Chest
-    [6] = true,   -- Waist (TBC - belt buckle not available, optional)
-    [7] = true,   -- Legs (armor kit / spellthread)
-    [8] = true,   -- Feet
-    [9] = true,   -- Wrist
-    [10] = true,  -- Hands
-    [15] = true,  -- Back
-    [11] = true,  -- Ring1 (enchanter only, skip warning)
-    [12] = true,  -- Ring2
-    [16] = true,  -- Main Hand
-    [17] = true,  -- Off Hand (shield/weapon)
-    [18] = true,  -- Ranged
-}
-
 -- Slots where missing enchant is a serious issue
 local ENCHANT_WARNING_SLOTS = {
     [1] = true, [3] = true, [5] = true, [7] = true, [8] = true,
