@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.9.0] - 2026-04-19
+
+### Added
+- enhance profession handling and item display across various modules
+
+
 ## [1.8.0] - 2026-04-19
 
 ### Added
