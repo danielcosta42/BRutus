@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.7.0] - 2026-04-19
+
+### Added
+- Implement profession freshness check and reminder system
+
+### Changed
+- remove unused ENCHANTABLE_SLOTS definition from MemberDetail.lua
+
+
 ## [1.6.0] - 2026-04-19
 
 ### Added
