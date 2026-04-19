@@ -171,7 +171,10 @@ function CommSystem:OnMessageReceived(msg, _, sender)
         if BRutus.OfficerNotes then
             BRutus.OfficerNotes:HandleIncoming(data)
         end
-
+    elseif msgType == "RC" then
+        if BRutus.RecipeTracker then
+            BRutus.RecipeTracker:HandleIncoming(sender, data)
+        end
     end
 end
 

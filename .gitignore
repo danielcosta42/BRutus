@@ -25,3 +25,7 @@ Cache/
 *.log
 *.bak
 *.tmp
+
+# AI agent instructions (local only)
+.github/copilot-instructions.md
+.cursorrules

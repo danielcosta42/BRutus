@@ -119,7 +119,8 @@ function CreateDetailFrame()
     ----------------------------------------------------------------
     local content = CreateFrame("ScrollFrame", "BRutusDetailScroll", frame, "UIPanelScrollFrameTemplate")
     content:SetPoint("TOPLEFT", 5, -55)
-    content:SetPoint("BOTTOMRIGHT", -25, 5)
+    content:SetPoint("BOTTOMRIGHT", -10, 5)
+    UI:SkinScrollBar(content, "BRutusDetailScroll")
 
     local child = CreateFrame("Frame", "BRutusDetailScrollChild", content)
     child:SetWidth(DETAIL_WIDTH - 35)

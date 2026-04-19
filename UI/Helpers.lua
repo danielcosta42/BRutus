@@ -128,6 +128,81 @@ function Helpers:CreateButton(parent, text, width, height)
 end
 
 ----------------------------------------------------------------------
+-- Create a styled checkbox with label
+----------------------------------------------------------------------
+function Helpers:CreateCheckbox(parent, labelText, size)
+    size = size or 20
+    local frame = CreateFrame("Frame", nil, parent)
+    frame:SetSize(size + 200, size)
+
+    local cb = CreateFrame("CheckButton", nil, frame)
+    cb:SetSize(size, size)
+    cb:SetPoint("LEFT", 0, 0)
+
+    -- Custom box background
+    local bg = cb:CreateTexture(nil, "BACKGROUND")
+    bg:SetTexture("Interface\\Buttons\\WHITE8x8")
+    bg:SetAllPoints()
+    bg:SetVertexColor(0.08, 0.06, 0.14, 0.9)
+
+    local border = cb:CreateTexture(nil, "BORDER")
+    border:SetTexture("Interface\\Buttons\\WHITE8x8")
+    border:SetPoint("TOPLEFT", -1, 1)
+    border:SetPoint("BOTTOMRIGHT", 1, -1)
+    border:SetVertexColor(C.accent.r, C.accent.g, C.accent.b, 0.5)
+
+    -- Checkmark text
+    local check = cb:CreateFontString(nil, "OVERLAY")
+    check:SetFont("Fonts\\FRIZQT__.TTF", size - 6, "OUTLINE")
+    check:SetPoint("CENTER", 1, 0)
+    check:SetTextColor(C.gold.r, C.gold.g, C.gold.b)
+    check:SetText("")
+    cb.checkMark = check
+
+    cb:SetScript("OnClick", function(self)
+        if self:GetChecked() then
+            self.checkMark:SetText("X")
+            border:SetVertexColor(C.gold.r, C.gold.g, C.gold.b, 0.8)
+        else
+            self.checkMark:SetText("")
+            border:SetVertexColor(C.accent.r, C.accent.g, C.accent.b, 0.5)
+        end
+        if self.onChanged then self:onChanged(self:GetChecked()) end
+    end)
+
+    -- Update visual on SetChecked
+    local origSetChecked = cb.SetChecked
+    cb.SetChecked = function(self, val)
+        origSetChecked(self, val)
+        if val then
+            self.checkMark:SetText("X")
+            border:SetVertexColor(C.gold.r, C.gold.g, C.gold.b, 0.8)
+        else
+            self.checkMark:SetText("")
+            border:SetVertexColor(C.accent.r, C.accent.g, C.accent.b, 0.5)
+        end
+    end
+
+    cb:SetScript("OnEnter", function()
+        bg:SetVertexColor(0.14, 0.10, 0.22, 0.9)
+    end)
+    cb:SetScript("OnLeave", function()
+        bg:SetVertexColor(0.08, 0.06, 0.14, 0.9)
+    end)
+
+    -- Label
+    local label = frame:CreateFontString(nil, "OVERLAY")
+    label:SetFont("Fonts\\FRIZQT__.TTF", 11, "OUTLINE")
+    label:SetPoint("LEFT", cb, "RIGHT", 6, 0)
+    label:SetTextColor(C.white.r, C.white.g, C.white.b)
+    label:SetText(labelText or "")
+    frame.label = label
+
+    frame.checkbox = cb
+    return frame
+end
+
+----------------------------------------------------------------------
 -- Create close button (X)
 ----------------------------------------------------------------------
 function Helpers:CreateCloseButton(parent)
@@ -158,6 +233,76 @@ function Helpers:CreateCloseButton(parent)
 end
 
 ----------------------------------------------------------------------
+-- Skin a default WoW scrollbar into a thin, subtle track+thumb
+-- Works with both UIPanelScrollFrameTemplate and FauxScrollFrameTemplate
+----------------------------------------------------------------------
+function Helpers:SkinScrollBar(scrollFrame, scrollName)
+    local scrollBar = scrollFrame.ScrollBar
+        or (scrollName and _G[scrollName .. "ScrollBar"])
+        or nil
+    if not scrollBar then return end
+
+    -- Hide the default Blizzard up/down buttons and thumb texture
+    local upBtn = scrollBar.ScrollUpButton
+        or _G[scrollName and (scrollName .. "ScrollBarScrollUpButton")]
+    local downBtn = scrollBar.ScrollDownButton
+        or _G[scrollName and (scrollName .. "ScrollBarScrollDownButton")]
+    local thumbTex = scrollBar.ThumbTexture
+        or (scrollBar.GetThumbTexture and scrollBar:GetThumbTexture())
+        or _G[scrollName and (scrollName .. "ScrollBarThumbTexture")]
+
+    if upBtn then upBtn:SetAlpha(0); upBtn:SetSize(1, 1); upBtn:EnableMouse(false) end
+    if downBtn then downBtn:SetAlpha(0); downBtn:SetSize(1, 1); downBtn:EnableMouse(false) end
+    if thumbTex then thumbTex:SetAlpha(0) end
+
+    -- Make the scrollbar thin and positioned inside the frame
+    scrollBar:SetWidth(6)
+    scrollBar:ClearAllPoints()
+    scrollBar:SetPoint("TOPRIGHT", scrollFrame, "TOPRIGHT", -2, -2)
+    scrollBar:SetPoint("BOTTOMRIGHT", scrollFrame, "BOTTOMRIGHT", -2, 2)
+
+    -- Track background
+    local track = scrollBar:CreateTexture(nil, "BACKGROUND")
+    track:SetAllPoints()
+    track:SetTexture("Interface\\Buttons\\WHITE8x8")
+    track:SetVertexColor(0.08, 0.08, 0.12, 0.4)
+
+    -- Custom thumb overlay
+    local thumb = scrollBar:CreateTexture(nil, "OVERLAY")
+    thumb:SetTexture("Interface\\Buttons\\WHITE8x8")
+    thumb:SetVertexColor(C.accent.r, C.accent.g, C.accent.b, 0.5)
+    thumb:SetSize(6, 40)
+    scrollBar.customThumb = thumb
+
+    -- Update thumb position on scroll
+    local function UpdateThumb()
+        local min, max = scrollBar:GetMinMaxValues()
+        local val = scrollBar:GetValue()
+        local trackHeight = scrollBar:GetHeight() or 100
+        local thumbHeight = math.max(20, trackHeight * (trackHeight / (trackHeight + max - min + 1)))
+        thumb:SetHeight(thumbHeight)
+
+        if max <= min then
+            thumb:Hide()
+            return
+        end
+        thumb:Show()
+        local ratio = (val - min) / (max - min)
+        local travel = trackHeight - thumbHeight
+        local yOff = -(ratio * travel)
+        thumb:ClearAllPoints()
+        thumb:SetPoint("TOPRIGHT", scrollBar, "TOPRIGHT", 0, yOff)
+    end
+
+    scrollBar:HookScript("OnValueChanged", function() UpdateThumb() end)
+    scrollBar:HookScript("OnMinMaxChanged", function() UpdateThumb() end)
+    -- Initial
+    C_Timer.After(0.05, UpdateThumb)
+
+    return scrollBar
+end
+
+----------------------------------------------------------------------
 -- Create a scroll frame with custom scrollbar
 ----------------------------------------------------------------------
 function Helpers:CreateScrollFrame(parent, name)
@@ -167,15 +312,8 @@ function Helpers:CreateScrollFrame(parent, name)
     scrollChild:SetWidth(scrollFrame:GetWidth())
     scrollChild:SetHeight(1)
 
-    -- Style the scrollbar
-    local scrollBar = scrollFrame.ScrollBar or _G[name .. "ScrollBar"]
-    if scrollBar then
-        -- Darken scrollbar track
-        local track = scrollBar:CreateTexture(nil, "BACKGROUND")
-        track:SetAllPoints(scrollBar)
-        track:SetTexture("Interface\\Buttons\\WHITE8x8")
-        track:SetVertexColor(0.1, 0.1, 0.15, 0.5)
-    end
+    -- Apply thin scrollbar skin
+    self:SkinScrollBar(scrollFrame, name)
 
     return scrollFrame, scrollChild
 end

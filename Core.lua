@@ -112,6 +112,17 @@ local DB_DEFAULTS = {
         sortAsc = false,
         showOffline = true,
         minimap = { hide = false },
+        modules = {
+            raidTracker = true,
+            lootTracker = true,
+            lootMaster = true,
+            consumableChecker = true,
+            recruitment = true,
+            trialTracker = true,
+            officerNotes = true,
+            tmb = true,
+            commSystem = true,
+        },
     },
     myData = {},
     lastSync = 0,
@@ -126,6 +137,12 @@ local DB_DEFAULTS = {
         attendance = {},
     },
     lootHistory = {},
+    lootMaster = {
+        rollDuration = 30,
+        autoAnnounce = true,
+        tmbOnlyMode = false,
+        awardHistory = {},
+    },
     officerNotes = {},
     trials = {},
     consumableChecks = { lastResults = {} },
@@ -187,6 +204,12 @@ function BRutus:Initialize()
 end
 
 function BRutus:OnLogin()
+    -- Module enabled helper
+    local function modEnabled(key)
+        if not self.db.settings or not self.db.settings.modules then return true end
+        return self.db.settings.modules[key] ~= false
+    end
+
     -- Initialize subsystems
     if BRutus.DataCollector then
         BRutus.DataCollector:Initialize()
@@ -194,30 +217,36 @@ function BRutus:OnLogin()
     if BRutus.AttunementTracker then
         BRutus.AttunementTracker:Initialize()
     end
-    if BRutus.CommSystem then
+    if BRutus.CommSystem and modEnabled("commSystem") then
         BRutus.CommSystem:Initialize()
     end
-    if BRutus.Recruitment then
+    if BRutus.Recruitment and modEnabled("recruitment") then
         BRutus.Recruitment:Initialize()
     end
-    if BRutus.TMB then
+    if BRutus.TMB and modEnabled("tmb") then
         BRutus.TMB:Initialize()
     end
-    if BRutus.RaidTracker then
+    if BRutus.RaidTracker and modEnabled("raidTracker") then
         BRutus.RaidTracker:Initialize()
     end
-    if BRutus.LootTracker then
+    if BRutus.LootTracker and modEnabled("lootTracker") then
         BRutus.LootTracker:Initialize()
     end
-    if BRutus.OfficerNotes then
+    if BRutus.LootMaster and modEnabled("lootMaster") then
+        BRutus.LootMaster:Initialize()
+    end
+    if BRutus.OfficerNotes and modEnabled("officerNotes") then
         BRutus.OfficerNotes:Initialize()
     end
-    if BRutus.TrialTracker then
+    if BRutus.TrialTracker and modEnabled("trialTracker") then
         BRutus.TrialTracker:Initialize()
         BRutus.TrialTracker:CheckExpired()
     end
-    if BRutus.ConsumableChecker then
+    if BRutus.ConsumableChecker and modEnabled("consumableChecker") then
         BRutus.ConsumableChecker:Initialize()
+    end
+    if BRutus.RecipeTracker then
+        BRutus.RecipeTracker:Initialize()
     end
 
 
@@ -319,6 +348,26 @@ SlashCmdList["BRUTUS"] = function(msg)
             end
         else
             BRutus:Print("Usage: /brutus note <PlayerName> <text>")
+        end
+    elseif msg == "lm" or msg == "lootmaster" then
+        if BRutus.LootMaster then
+            if BRutus.LootMaster:IsMasterLooter() then
+                BRutus:Print("Loot Master mode active. Open loot to start.")
+            else
+                BRutus:Print("You are not the Master Looter.")
+            end
+        end
+    elseif msg:match("^lm announce") then
+        -- /brutus lm announce - manually announce item from target tooltip
+        BRutus:Print("Open loot window as Master Looter to announce items.")
+    elseif msg == "exportatt" or msg == "exportattendance" then
+        if BRutus.RaidTracker then
+            local json, err = BRutus.RaidTracker:ExportForTMB()
+            if json then
+                BRutus:ShowExportPopup("TMB Attendance Export", json)
+            else
+                BRutus:Print("|cffFF4444Export failed:|r " .. (err or "unknown error"))
+            end
         end
     else
         BRutus:ToggleRoster()

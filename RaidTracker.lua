@@ -361,3 +361,39 @@ function RaidTracker:CountTable(t)
     for _ in pairs(t) do n = n + 1 end
     return n
 end
+
+----------------------------------------------------------------------
+-- Export attendance data as TMB-compatible JSON
+-- TMB expects: { "character_name": { "attendance_percentage": N }, ... }
+----------------------------------------------------------------------
+function RaidTracker:ExportForTMB()
+    local total = self:GetTotalSessions()
+    if total == 0 then return nil, "No raid sessions recorded." end
+
+    local att = BRutus.db.raidTracker.attendance or {}
+    local lines = {}
+    table.insert(lines, "{")
+
+    local entries = {}
+    for playerKey, data in pairs(att) do
+        local name = playerKey:match("^([^-]+)")
+        if name and data.raids > 0 then
+            local pct = self:GetAttendancePercent(playerKey)
+            table.insert(entries, {
+                name = name,
+                pct = pct,
+                raids = data.raids,
+            })
+        end
+    end
+    table.sort(entries, function(a, b) return a.name < b.name end)
+
+    for i, e in ipairs(entries) do
+        local comma = (i < #entries) and "," or ""
+        table.insert(lines, string.format('  "%s": {"attendance_percentage": %d, "raids_attended": %d, "raids_total": %d}%s',
+            e.name, e.pct, e.raids, total, comma))
+    end
+
+    table.insert(lines, "}")
+    return table.concat(lines, "\n"), nil
+end

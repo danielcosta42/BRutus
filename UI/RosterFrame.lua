@@ -215,11 +215,13 @@ function BRutus.CreateRosterFrame()
 
     -- Create tabs
     CreateTab("roster", "Roster", false)
+    CreateTab("recipes", "Recipes", false)
     CreateTab("tmb", "TMB Loot", false)
     CreateTab("raids", "Raids", false)
     CreateTab("loot", "Loot", false)
     CreateTab("trials", "Trials", true)
     CreateTab("recruitment", "Recruitment", true)
+    CreateTab("settings", "Settings", false)
 
     ----------------------------------------------------------------
     -- ROSTER PANEL
@@ -379,7 +381,8 @@ function BRutus.CreateRosterFrame()
 
     local scrollFrame = CreateFrame("ScrollFrame", "BRutusRosterScroll", rosterContainer, "FauxScrollFrameTemplate")
     scrollFrame:SetPoint("TOPLEFT", 0, 0)
-    scrollFrame:SetPoint("BOTTOMRIGHT", -20, 0)
+    scrollFrame:SetPoint("BOTTOMRIGHT", 0, 0)
+    UI:SkinScrollBar(scrollFrame, "BRutusRosterScroll")
 
     frame.scrollFrame = scrollFrame
     frame.rows = {}
@@ -393,6 +396,16 @@ function BRutus.CreateRosterFrame()
             frame:UpdateRows()
         end)
     end)
+
+    ----------------------------------------------------------------
+    -- RECIPES PANEL
+    ----------------------------------------------------------------
+    local recipesPanel = CreateFrame("Frame", nil, frame)
+    recipesPanel:SetPoint("TOPLEFT", 0, contentTop)
+    recipesPanel:SetPoint("BOTTOMRIGHT", 0, 30)
+    recipesPanel:Hide()
+    frame.tabPanels["recipes"] = recipesPanel
+    BRutus:CreateRecipesPanel(recipesPanel, frame)
 
     ----------------------------------------------------------------
     -- RECRUITMENT PANEL (officer only)
@@ -443,6 +456,16 @@ function BRutus.CreateRosterFrame()
     trialsPanel:Hide()
     frame.tabPanels["trials"] = trialsPanel
     BRutus:CreateTrialsPanel(trialsPanel, frame)
+
+    ----------------------------------------------------------------
+    -- SETTINGS PANEL
+    ----------------------------------------------------------------
+    local settingsPanel = CreateFrame("Frame", nil, frame)
+    settingsPanel:SetPoint("TOPLEFT", 0, contentTop)
+    settingsPanel:SetPoint("BOTTOMRIGHT", 0, 30)
+    settingsPanel:Hide()
+    frame.tabPanels["settings"] = settingsPanel
+    BRutus:CreateSettingsPanel(settingsPanel, frame)
 
     ----------------------------------------------------------------
     -- Bottom Bar
@@ -1358,7 +1381,8 @@ function BRutus:CreateTMBPanel(parent, _mainFrame)
 
     local listScroll = CreateFrame("ScrollFrame", "BRutusTMBListScroll", listContainer, "UIPanelScrollFrameTemplate")
     listScroll:SetPoint("TOPLEFT", 0, 0)
-    listScroll:SetPoint("BOTTOMRIGHT", -20, 0)
+    listScroll:SetPoint("BOTTOMRIGHT", 0, 0)
+    UI:SkinScrollBar(listScroll, "BRutusTMBListScroll")
 
     local listChild = CreateFrame("Frame", "BRutusTMBListChild", listScroll)
     listChild:SetWidth(listContainer:GetWidth() or 720)
@@ -1746,7 +1770,8 @@ function BRutus:CreateTMBPanel(parent, _mainFrame)
 
     local editScroll = CreateFrame("ScrollFrame", "BRutusTMBModalScroll", editContainer, "UIPanelScrollFrameTemplate")
     editScroll:SetPoint("TOPLEFT", 6, -6)
-    editScroll:SetPoint("BOTTOMRIGHT", -24, 6)
+    editScroll:SetPoint("BOTTOMRIGHT", -10, 6)
+    UI:SkinScrollBar(editScroll, "BRutusTMBModalScroll")
 
     local importBox = CreateFrame("EditBox", "BRutusTMBModalEditBox", editScroll)
     importBox:SetMultiLine(true)

@@ -28,12 +28,15 @@ RecruitmentSystem.lua
 TMBIntegration.lua
 RaidTracker.lua
 LootTracker.lua
+LootMaster.lua
+RecipeTracker.lua
 OfficerNotes.lua
 TrialTracker.lua
 ConsumableChecker.lua
 
 # UI
 UI\Helpers.lua
+UI\RecipesPanel.lua
 UI\FeaturePanels.lua
 UI\RosterFrame.lua
 UI\MemberDetail.lua
