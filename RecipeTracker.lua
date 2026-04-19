@@ -82,6 +82,10 @@ function RecipeTracker:ScanTradeSkill()
             if recipeLink then
                 spellId = tonumber(recipeLink:match("enchant:(%d+)") or recipeLink:match("spell:(%d+)"))
             end
+            -- Fallback: extract enchant ID from item link if it's an enchant link
+            if not spellId and itemLink then
+                spellId = tonumber(itemLink:match("enchant:(%d+)"))
+            end
             table.insert(recipes, {
                 name = name,
                 itemId = itemId,
@@ -118,8 +122,13 @@ function RecipeTracker:ScanCraft()
                 itemId = tonumber(itemLink:match("item:(%d+)"))
             end
             local spellId
+            -- Try spell link first
             if spellLink then
                 spellId = tonumber(spellLink:match("enchant:(%d+)") or spellLink:match("spell:(%d+)"))
+            end
+            -- Enchanting: GetCraftItemLink returns enchant:XXXXX, extract as spellId
+            if not spellId and itemLink then
+                spellId = tonumber(itemLink:match("enchant:(%d+)"))
             end
             table.insert(recipes, {
                 name = name,
@@ -304,6 +313,37 @@ function RecipeTracker:BuildRecipeIndex()
                 end
             end
         end
+    end
+
+    -- Second pass: merge entries with the same display name + profession
+    -- (handles locale duplication when some entries lack spellId/itemId)
+    local byDisplayKey = {}
+    local mergeTargets = {}
+    for key, entry in pairs(grouped) do
+        local displayKey = (entry.name or "") .. "|" .. (entry.profName or "")
+        if byDisplayKey[displayKey] then
+            -- Merge crafters into the existing entry
+            local target = byDisplayKey[displayKey]
+            for _, crafter in ipairs(entry.crafters) do
+                if not grouped[target]._crafterSeen[crafter.playerKey] then
+                    grouped[target]._crafterSeen[crafter.playerKey] = true
+                    table.insert(grouped[target].crafters, crafter)
+                end
+            end
+            -- Prefer the entry that has an ID
+            if not grouped[target].spellId and entry.spellId then
+                grouped[target].spellId = entry.spellId
+            end
+            if not grouped[target].itemId and entry.itemId then
+                grouped[target].itemId = entry.itemId
+            end
+            mergeTargets[key] = true
+        else
+            byDisplayKey[displayKey] = key
+        end
+    end
+    for key in pairs(mergeTargets) do
+        grouped[key] = nil
     end
 
     local index = {}
