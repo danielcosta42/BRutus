@@ -152,6 +152,39 @@ read_globals = {
     "GetInstanceInfo",
     "GetNumGroupMembers",
     "IsInRaid",
+    "GetRaidRosterInfo",
+
+    -- WoW API: Loot
+    "IsMasterLooter",
+    "GetLootMethod",
+    "GetNumLootItems",
+    "GetLootSlotInfo",
+    "GetLootSlotLink",
+    "GiveMasterLoot",
+    "GetMasterLootCandidate",
+
+    -- WoW API: Containers & Trade
+    "C_Container",
+    "GetContainerNumSlots",
+    "GetContainerItemInfo",
+    "UseContainerItem",
+    "GetUnitName",
+    "TradeFrameRecipientNameText",
+
+    -- WoW API: Party
+    "C_PartyInfo",
+
+    -- WoW API: Tradeskills & Crafting
+    "GetTradeSkillLine",
+    "GetNumTradeSkills",
+    "GetTradeSkillInfo",
+    "GetTradeSkillItemLink",
+    "GetTradeSkillRecipeLink",
+    "GetCraftDisplaySkillLine",
+    "GetNumCrafts",
+    "GetCraftInfo",
+    "GetCraftItemLink",
+    "GetCraftSpellLink",
 
     -- WoW API: Scroll frames
     "FauxScrollFrame_Update",
@@ -164,6 +197,7 @@ read_globals = {
     "ShowUIPanel",
     "HideUIPanel",
     "InterfaceOptionsFrame_OpenToCategory",
+    "ChatFrame_OpenChat",
 
     -- WoW Global constants & tables
     "SOUNDKIT",

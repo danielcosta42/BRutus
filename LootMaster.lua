@@ -290,7 +290,7 @@ end
 ----------------------------------------------------------------------
 -- Normal announce (no auto-council)
 ----------------------------------------------------------------------
-function LootMaster:DoNormalAnnounce(itemLink, lootSlot, itemId)
+function LootMaster:DoNormalAnnounce(itemLink, _lootSlot, itemId)
     -- Announce in raid chat
     local msg = string.format("{rt4} ROLL: %s {rt4}  -  /w ML: MS / OS / PASS  -  %ds", itemLink, self.ROLL_DURATION)
     self:SafeSendChat(msg, "RAID_WARNING")
@@ -318,7 +318,6 @@ end
 -- Auto-Council: single clear TMB winner - award directly
 ----------------------------------------------------------------------
 function LootMaster:AutoCouncilAward(winner, itemLink, lootSlot, allCandidates)
-    local C = BRutus.Colors
     local tmbStr = string.format("%s #%d", winner.tmbType, winner.order)
 
     -- Announce in raid
@@ -334,7 +333,7 @@ end
 ----------------------------------------------------------------------
 -- Auto-Council: multiple players tied at same TMB priority - they roll
 ----------------------------------------------------------------------
-function LootMaster:AutoCouncilRoll(tied, itemLink, lootSlot, allCandidates)
+function LootMaster:AutoCouncilRoll(tied, itemLink, _lootSlot, _allCandidates)
     -- Build names string
     local names = {}
     for _, c in ipairs(tied) do table.insert(names, c.name) end
@@ -570,8 +569,8 @@ function LootMaster:RegisterRoll(sender, rollType)
     end
     -- Fallback: check stored addon data or player's own class
     if class == "UNKNOWN" then
-        local realm = GetRealmName()
-        local pKey = BRutus:GetPlayerKey(name, realm)
+        local playerRealm = GetRealmName()
+        local pKey = BRutus:GetPlayerKey(name, playerRealm)
         local memberData = BRutus.db.members[pKey]
         if memberData and memberData.class then
             class = memberData.class
@@ -756,11 +755,13 @@ function LootMaster:FindItemInBags(itemId)
                 return bag, slot
             else
                 -- Fallback for older API
-                local _, _, _, _, _, _, link = GetContainerItemInfo and GetContainerItemInfo(bag, slot)
-                if link then
-                    local id = tonumber(link:match("item:(%d+)"))
-                    if id == itemId then
-                        return bag, slot
+                if GetContainerItemInfo then
+                    local link = select(7, GetContainerItemInfo(bag, slot))
+                    if link then
+                        local id = tonumber(link:match("item:(%d+)"))
+                        if id == itemId then
+                            return bag, slot
+                        end
                     end
                 end
             end
@@ -1202,7 +1203,6 @@ end
 ----------------------------------------------------------------------
 function LootMaster:RefreshRollFrame()
     if not self.rollFrame or not self.rollFrame:IsShown() then return end
-    local C = BRutus.Colors
     local f = self.rollFrame
 
     -- Update item
@@ -1317,7 +1317,6 @@ end
 ----------------------------------------------------------------------
 function LootMaster:UpdateRollTimer()
     if not self.rollFrame or not self.activeLoot then return end
-    local C = BRutus.Colors
 
     if self.activeLoot.ended then
         self.rollFrame.timerText:SetText("|cffFF4444Rolling ended - click Award|r")

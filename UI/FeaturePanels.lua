@@ -468,7 +468,7 @@ end
 ----------------------------------------------------------------------
 -- SETTINGS PANEL
 ----------------------------------------------------------------------
-function BRutus:CreateSettingsPanel(parent, mainFrame)
+function BRutus:CreateSettingsPanel(parent, _mainFrame)
     local scrollFrame, content = UI:CreateScrollFrame(parent, "BRutusSettingsScroll")
     scrollFrame:SetPoint("TOPLEFT", 12, -10)
     scrollFrame:SetPoint("BOTTOMRIGHT", -12, 10)

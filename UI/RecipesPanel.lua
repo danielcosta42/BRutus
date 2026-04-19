@@ -104,7 +104,6 @@ function BRutus:CreateRecipesPanel(parent, _mainFrame)
     filterRow:SetHeight(26)
 
     local filterButtons = {}
-    local allProfessions = { "All" }
 
     local function RefreshResults()
         if not BRutus.RecipeTracker then
@@ -351,9 +350,9 @@ function BRutus:CreateRecipesPanel(parent, _mainFrame)
 
         -- When mouse leaves the whisper button, check if still on the row
         whisperBtn:HookScript("OnLeave", function(self)
-            local parent = self:GetParent()
-            if not parent:IsMouseOver() then
-                RowLeave(parent)
+            local rowParent = self:GetParent()
+            if not rowParent:IsMouseOver() then
+                RowLeave(rowParent)
             end
         end)
 
