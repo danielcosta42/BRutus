@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.11.0] - 2026-04-19
+
+### Added
+- enhance guild invitation tracking and welcome messaging
+
+
 ## [1.10.0] - 2026-04-19
 
 ### Added
