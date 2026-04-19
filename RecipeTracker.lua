@@ -444,28 +444,19 @@ function RecipeTracker:BuildRecipeIndex()
         end
     end
 
-    -- Second pass: merge name-only recipes into ID-based groups when possible
+    -- Second pass: merge name-only recipes into ID-based groups when possible.
+    -- If no ID match exists, SKIP the recipe entirely — name-only entries from
+    -- other locales cause duplication and cannot be reliably deduplicated.
     for _, entry in ipairs(nameOnlyQueue) do
         local recipe = entry.recipe
         local canonical = entry.canonical
         local lookupKey = strlower(recipe.name or "") .. "|" .. canonical
         local recipeKey = nameToKey[lookupKey]
 
-        if not recipeKey then
-            -- No ID match — create a name-only entry
-            recipeKey = "n" .. (recipe.name or "") .. "|" .. canonical
-            if not grouped[recipeKey] then
-                grouped[recipeKey] = {
-                    name = recipe.name or "?",
-                    itemId = recipe.itemId,
-                    spellId = recipe.spellId,
-                    profName = canonical,
-                    crafters = {},
-                    _crafterSeen = {},
-                }
-            end
+        if recipeKey then
+            addCrafter(recipeKey, entry.playerKey, entry.playerName)
         end
-        addCrafter(recipeKey, entry.playerKey, entry.playerName)
+        -- else: skip — this recipe has no ID and no name match; it would cause dupes
     end
 
     -- Third pass: merge remaining entries that share the same display name + profession
