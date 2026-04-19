@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.13.0] - 2026-04-19
+
+### Added
+- improve recipe deduplication by skipping name-only entries without ID matches
+- enhance tooltip display for recipe items and spells in the Recipes panel
+- enrich recipe data by merging spellIds and enhance gem tooltips in member detail
+- enhance recipe scanning to extract enchant IDs from item links and merge duplicate entries
+
+
 ## [1.12.0] - 2026-04-19
 
 ### Added
