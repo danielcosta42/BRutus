@@ -339,6 +339,11 @@ function DataCollector:StoreReceivedData(playerKey, data)
                     BRutusDB.recipes[playerKey][oldKey] = nil
                 end
             end
+            -- Preserve spellIds: merge from existing data into incoming
+            -- (same player = same locale, names match)
+            if BRutus.RecipeTracker then
+                BRutus.RecipeTracker:MergeSpellIds(BRutusDB.recipes[playerKey][canonical], recipes)
+            end
             BRutusDB.recipes[playerKey][canonical] = recipes
         end
     end

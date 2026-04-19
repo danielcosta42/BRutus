@@ -31,8 +31,114 @@ function RecipeTracker:Initialize()
         BRutusDB.recipes = {}
     end
 
+    -- Enrich stored recipes: propagate spellIds from players who have them
+    -- to same-locale players who don't (same name = same locale)
+    self:EnrichStoredRecipes()
+
     -- Hook tooltips to show crafters
     self:HookTooltips()
+end
+
+----------------------------------------------------------------------
+-- Propagate spellIds across players within the same locale.
+-- If ANY player has a recipe with spellId + name "Enchant X",
+-- ALL other players with name "Enchant X" (same profession) get
+-- that spellId. This fixes old data that was stored without IDs.
+----------------------------------------------------------------------
+function RecipeTracker:EnrichStoredRecipes()
+    -- Phase 1: Build name→spellId per profession from ALL recipes that have spellId.
+    -- Includes BOTH the original recipe.name (sender's locale) and the locally
+    -- resolved name from GetSpellInfo (our locale). This enables cross-locale matching
+    -- when at least one player per locale has the spellId.
+    local profLookup = {} -- profName → { lowerName → spellId }
+    local profItemLookup = {} -- profName → { lowerName → itemId }
+
+    for _, professions in pairs(BRutusDB.recipes or {}) do
+        for profName, recipes in pairs(professions) do
+            if not profLookup[profName] then profLookup[profName] = {} end
+            if not profItemLookup[profName] then profItemLookup[profName] = {} end
+            for _, r in ipairs(recipes) do
+                if r.spellId then
+                    -- Register original sender name (could be any locale)
+                    if r.name then
+                        profLookup[profName][strlower(r.name)] = r.spellId
+                    end
+                    -- Register local client name (from GetSpellInfo)
+                    local localName = GetSpellInfo(r.spellId)
+                    if localName and localName ~= "" then
+                        profLookup[profName][strlower(localName)] = r.spellId
+                    end
+                end
+                if r.itemId and r.name then
+                    profItemLookup[profName][strlower(r.name)] = r.itemId
+                    local localName = GetItemInfo(r.itemId)
+                    if localName and localName ~= "" then
+                        profItemLookup[profName][strlower(localName)] = r.itemId
+                    end
+                end
+            end
+        end
+    end
+
+    -- Phase 2: Enrich recipes without spellId/itemId
+    local count = 0
+    for _, professions in pairs(BRutusDB.recipes or {}) do
+        for profName, recipes in pairs(professions) do
+            local sLookup = profLookup[profName]
+            local iLookup = profItemLookup[profName]
+            if sLookup then
+                for _, r in ipairs(recipes) do
+                    if not r.spellId and r.name then
+                        local sid = sLookup[strlower(r.name)]
+                        if sid then
+                            r.spellId = sid
+                            count = count + 1
+                        end
+                    end
+                    if not r.itemId and r.name and iLookup then
+                        local iid = iLookup[strlower(r.name)]
+                        if iid then
+                            r.itemId = iid
+                            count = count + 1
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    if count > 0 then
+        BRutus:Print(format("|cff00ff00Recipe data upgraded:|r enriched %d recipes with IDs.", count))
+    end
+end
+
+----------------------------------------------------------------------
+-- Helper: merge spellIds from existing recipes into incoming recipes.
+-- Same player = same locale, so names match.
+-- Also uses cross-player lookup as fallback.
+----------------------------------------------------------------------
+function RecipeTracker:MergeSpellIds(existing, incoming)
+    if not existing or not incoming then return end
+
+    -- Build name→spellId from existing data
+    local lookup = {}
+    for _, r in ipairs(existing) do
+        if r.name then
+            if r.spellId then
+                lookup[strlower(r.name)] = r.spellId
+            end
+        end
+    end
+
+    -- Enrich incoming
+    for _, r in ipairs(incoming) do
+        if not r.spellId and r.name then
+            local sid = lookup[strlower(r.name)]
+            if sid then
+                r.spellId = sid
+            end
+        end
+    end
 end
 
 local SCAN_COOLDOWN = 5 -- seconds between scans of the same type
@@ -232,6 +338,9 @@ function RecipeTracker:HandleIncoming(sender, data)
         end
     end
 
+    -- Preserve spellIds: merge from existing data into incoming
+    self:MergeSpellIds(BRutusDB.recipes[key][profName], recipes)
+
     BRutusDB.recipes[key][profName] = recipes
 end
 
@@ -263,66 +372,119 @@ end
 function RecipeTracker:BuildRecipeIndex()
     local grouped = {}
     local DC = BRutus.DataCollector
+
+    -- nameToKey: maps "name|prof" → recipeKey for recipes that have IDs
+    -- Stores both the original sender name and the locally resolved name
+    -- so name-only recipes from ANY locale can find a match.
+    local nameToKey = {}
+
+    local function addCrafter(recipeKey, playerKey, playerName)
+        if not grouped[recipeKey]._crafterSeen[playerKey] then
+            grouped[recipeKey]._crafterSeen[playerKey] = true
+            table.insert(grouped[recipeKey].crafters, {
+                playerKey = playerKey,
+                playerName = playerName,
+            })
+        end
+    end
+
+    -- First pass: group all recipes; build name→key lookup from ID-based entries
+    local nameOnlyQueue = {}
     for playerKey, professions in pairs(BRutusDB.recipes or {}) do
         local playerName = playerKey:match("^([^-]+)") or playerKey
         for profName, recipes in pairs(professions) do
             local canonical = DC and DC.GetCanonicalProfName and DC:GetCanonicalProfName(profName) or profName
             for _, recipe in ipairs(recipes) do
-                -- Use spellId as primary key, fall back to itemId, then name
                 local recipeKey
                 if recipe.spellId then
                     recipeKey = "s" .. recipe.spellId .. "|" .. canonical
                 elseif recipe.itemId then
                     recipeKey = "i" .. recipe.itemId .. "|" .. canonical
+                end
+
+                if recipeKey then
+                    -- ID-based recipe
+                    if not grouped[recipeKey] then
+                        local displayName = recipe.name
+                        if recipe.spellId then
+                            local spellName = GetSpellInfo(recipe.spellId)
+                            if spellName and spellName ~= "" then
+                                displayName = spellName
+                            end
+                        end
+                        if recipe.itemId and (not displayName or displayName == recipe.name) then
+                            local itemName = GetItemInfo(recipe.itemId)
+                            if itemName and itemName ~= "" then
+                                displayName = itemName
+                            end
+                        end
+
+                        grouped[recipeKey] = {
+                            name = displayName or recipe.name or "?",
+                            itemId = recipe.itemId,
+                            spellId = recipe.spellId,
+                            profName = canonical,
+                            crafters = {},
+                            _crafterSeen = {},
+                        }
+
+                        -- Map both the original name and the resolved name to this key
+                        if recipe.name then
+                            nameToKey[strlower(recipe.name) .. "|" .. canonical] = recipeKey
+                        end
+                        if displayName and displayName ~= recipe.name then
+                            nameToKey[strlower(displayName) .. "|" .. canonical] = recipeKey
+                        end
+                    else
+                        -- Entry exists; register additional name variants
+                        if recipe.name then
+                            nameToKey[strlower(recipe.name) .. "|" .. canonical] = recipeKey
+                        end
+                    end
+                    addCrafter(recipeKey, playerKey, playerName)
                 else
-                    recipeKey = "n" .. (recipe.name or "") .. "|" .. canonical
-                end
-
-                if not grouped[recipeKey] then
-                    -- Resolve localized display name for local client
-                    local displayName = recipe.name -- fallback
-                    if recipe.spellId then
-                        local spellName = GetSpellInfo(recipe.spellId)
-                        if spellName and spellName ~= "" then
-                            displayName = spellName
-                        end
-                    end
-                    if recipe.itemId and (not displayName or displayName == recipe.name) then
-                        local itemName = GetItemInfo(recipe.itemId)
-                        if itemName and itemName ~= "" then
-                            displayName = itemName
-                        end
-                    end
-
-                    grouped[recipeKey] = {
-                        name = displayName or recipe.name or "?",
-                        itemId = recipe.itemId,
-                        spellId = recipe.spellId,
-                        profName = canonical,
-                        crafters = {},
-                        _crafterSeen = {},
-                    }
-                end
-                -- Deduplicate: skip if this player already added for this recipe
-                if not grouped[recipeKey]._crafterSeen[playerKey] then
-                    grouped[recipeKey]._crafterSeen[playerKey] = true
-                    table.insert(grouped[recipeKey].crafters, {
+                    -- No ID — queue for second pass
+                    table.insert(nameOnlyQueue, {
+                        recipe = recipe,
                         playerKey = playerKey,
                         playerName = playerName,
+                        canonical = canonical,
                     })
                 end
             end
         end
     end
 
-    -- Second pass: merge entries with the same display name + profession
-    -- (handles locale duplication when some entries lack spellId/itemId)
+    -- Second pass: merge name-only recipes into ID-based groups when possible
+    for _, entry in ipairs(nameOnlyQueue) do
+        local recipe = entry.recipe
+        local canonical = entry.canonical
+        local lookupKey = strlower(recipe.name or "") .. "|" .. canonical
+        local recipeKey = nameToKey[lookupKey]
+
+        if not recipeKey then
+            -- No ID match — create a name-only entry
+            recipeKey = "n" .. (recipe.name or "") .. "|" .. canonical
+            if not grouped[recipeKey] then
+                grouped[recipeKey] = {
+                    name = recipe.name or "?",
+                    itemId = recipe.itemId,
+                    spellId = recipe.spellId,
+                    profName = canonical,
+                    crafters = {},
+                    _crafterSeen = {},
+                }
+            end
+        end
+        addCrafter(recipeKey, entry.playerKey, entry.playerName)
+    end
+
+    -- Third pass: merge remaining entries that share the same display name + profession
     local byDisplayKey = {}
     local mergeTargets = {}
     for key, entry in pairs(grouped) do
-        local displayKey = (entry.name or "") .. "|" .. (entry.profName or "")
+        local displayKey = strlower(entry.name or "") .. "|" .. (entry.profName or "")
         if byDisplayKey[displayKey] then
-            -- Merge crafters into the existing entry
             local target = byDisplayKey[displayKey]
             for _, crafter in ipairs(entry.crafters) do
                 if not grouped[target]._crafterSeen[crafter.playerKey] then
@@ -330,7 +492,6 @@ function RecipeTracker:BuildRecipeIndex()
                     table.insert(grouped[target].crafters, crafter)
                 end
             end
-            -- Prefer the entry that has an ID
             if not grouped[target].spellId and entry.spellId then
                 grouped[target].spellId = entry.spellId
             end
@@ -348,7 +509,7 @@ function RecipeTracker:BuildRecipeIndex()
 
     local index = {}
     for _, entry in pairs(grouped) do
-        entry._crafterSeen = nil -- clean up temp field
+        entry._crafterSeen = nil
         table.insert(index, entry)
     end
     return index

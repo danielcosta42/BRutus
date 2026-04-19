@@ -736,6 +736,19 @@ function CreateGearRow(parent, slotId, item, yOff, width)
                     gemFrame:SetPoint("LEFT", gemAnchor, "RIGHT", 4, 0)
                     gemFrame:Show()
                     gemAnchor = gemFrame
+
+                    -- Gem tooltip on hover
+                    if gem.id then
+                        gemFrame:EnableMouse(true)
+                        gemFrame:SetScript("OnEnter", function(self)
+                            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                            GameTooltip:SetHyperlink("item:" .. gem.id)
+                            GameTooltip:Show()
+                        end)
+                        gemFrame:SetScript("OnLeave", function()
+                            GameTooltip:Hide()
+                        end)
+                    end
                 end
             end
         end
