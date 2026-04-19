@@ -427,11 +427,19 @@ function BRutus:CreateRecipesPanel(parent, _mainFrame)
                 row.playerName:SetText(table.concat(crafterParts, ", "))
                 row.playerName:SetAlpha(1.0)
 
-                -- Whisper button — whisper first online crafter
+                -- Whisper button — whisper first online crafter with item link
                 row.firstOnlineCrafter = firstOnlineCrafter
                 row.whisperBtn:SetScript("OnClick", function()
                     if firstOnlineCrafter then
-                        ChatFrame_OpenChat("/w " .. firstOnlineCrafter .. " ")
+                        local itemLink
+                        if entry.itemId then
+                            itemLink = select(2, GetItemInfo(entry.itemId))
+                        end
+                        if itemLink then
+                            ChatFrame_OpenChat("/w " .. firstOnlineCrafter .. " Você consegue craftar " .. itemLink .. " ?")
+                        else
+                            ChatFrame_OpenChat("/w " .. firstOnlineCrafter .. " Você consegue craftar " .. (entry.name or "esse item") .. " ?")
+                        end
                     end
                 end)
                 row.whisperBtn:Hide()
