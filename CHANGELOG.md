@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.12.0] - 2026-04-19
+
+### Added
+- add item crafter index and tooltip enhancements for recipe visibility
+- enhance whisper functionality to include item link in messages
+- restrict officer-only module initialization and settings visibility
+
+
 ## [1.11.0] - 2026-04-19
 
 ### Added
