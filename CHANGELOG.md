@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.6.0] - 2026-04-19
+
+### Added
+- enhance WoW API integration and improve function parameters in LootMaster and UI panels
+
+### Other
+- Add Recipe Tracker and Recipes Panel for guild tradeskill management
+
+
 ## [1.0.0] - 2026-04-18
 
 ### Added
