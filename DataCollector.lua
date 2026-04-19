@@ -72,6 +72,10 @@ function DataCollector:CollectGear()
             local itemName, _, itemQuality, itemLevel, _, _, _, _, _, itemIcon = GetItemInfo(itemLink)
             local itemId = tonumber(itemLink:match("item:(%d+)"))
 
+            -- Parse enchant and gems from the item link
+            -- TBC format: item:itemId:enchantId:gem1:gem2:gem3:gem4:suffixId:uniqueId:...
+            local enchantId, gems = self:ParseItemLink(itemLink)
+
             gear[slotId] = {
                 link = itemLink,
                 id = itemId,
@@ -79,6 +83,9 @@ function DataCollector:CollectGear()
                 quality = itemQuality or 0,
                 ilvl = itemLevel or 0,
                 icon = itemTexture or itemIcon or "",
+                enchantId = enchantId,
+                enchantName = enchantId and enchantId > 0 and self:GetEnchantName(enchantId) or nil,
+                gems = gems,
             }
         else
             gear[slotId] = nil
@@ -86,6 +93,73 @@ function DataCollector:CollectGear()
     end
 
     return gear
+end
+
+----------------------------------------------------------------------
+-- Parse enchant and gem IDs from an item link
+----------------------------------------------------------------------
+function DataCollector:ParseItemLink(link)
+    if not link then return nil, {} end
+
+    -- item:itemId:enchantId:gem1:gem2:gem3:gem4:suffixId:uniqueId:...
+    local parts = { strsplit(":", link:match("item:([%d:-]+)") or "") }
+    local enchantId = tonumber(parts[2]) or 0
+    local gems = {}
+
+    for i = 3, 5 do
+        local gemId = tonumber(parts[i]) or 0
+        if gemId > 0 then
+            local gemName, _, _, _, _, _, _, _, _, gemIcon = GetItemInfo(gemId)
+            table.insert(gems, {
+                id = gemId,
+                name = gemName or "",
+                icon = gemIcon or "",
+            })
+        end
+    end
+
+    return enchantId > 0 and enchantId or nil, gems
+end
+
+----------------------------------------------------------------------
+-- Get enchant display name from enchant ID
+-- Uses tooltip scanning as the only reliable method in Classic
+----------------------------------------------------------------------
+local ENCHANT_CACHE = {}
+
+function DataCollector:GetEnchantName(enchantId)
+    if not enchantId or enchantId == 0 then return nil end
+    if ENCHANT_CACHE[enchantId] then return ENCHANT_CACHE[enchantId] end
+
+    -- Build a fake item link with just the enchant to scan the tooltip
+    -- Use a common white-quality item (Linen Cloth = 2589) as base
+    local fakeLink = string.format("|cffffffff|Hitem:2589:%d:0:0:0:0:0:0:0|h[Scan]|h|r", enchantId)
+    local tip = BRutus.scanTooltip
+    if not tip then
+        tip = CreateFrame("GameTooltip", "BRutusScanTooltip", nil, "GameTooltipTemplate")
+        tip:SetOwner(UIParent, "ANCHOR_NONE")
+        BRutus.scanTooltip = tip
+    end
+    tip:ClearLines()
+    tip:SetHyperlink(fakeLink)
+
+    -- The enchant name appears on lines after the item name, look for green text
+    for i = 2, tip:NumLines() do
+        local line = _G["BRutusScanTooltipTextLeft" .. i]
+        if line then
+            local r, g, b = line:GetTextColor()
+            -- Green text = enchant lines (r~0, g~1, b~0)
+            if g > 0.8 and r < 0.2 and b < 0.2 then
+                local text = line:GetText()
+                if text and text ~= "" then
+                    ENCHANT_CACHE[enchantId] = text
+                    return text
+                end
+            end
+        end
+    end
+
+    return nil
 end
 
 ----------------------------------------------------------------------
@@ -191,6 +265,11 @@ function DataCollector:StoreReceivedData(playerKey, data)
 
     BRutus.db.members[playerKey] = existing
 
+    -- Update trial snapshots if this player is a trial
+    if BRutus.TrialTracker then
+        BRutus.TrialTracker:UpdateSnapshots()
+    end
+
     -- Refresh UI if open
     if BRutus.RosterFrame and BRutus.RosterFrame:IsShown() then
         BRutus.RosterFrame:RefreshRoster()
@@ -223,13 +302,22 @@ function DataCollector:GetBroadcastData()
     if myData.gear then
         clean.gear = {}
         for slotId, item in pairs(myData.gear) do
-            clean.gear[slotId] = {
+            local gearEntry = {
                 id = item.id,
                 name = item.name,
                 quality = item.quality,
                 ilvl = item.ilvl,
                 icon = item.icon,
+                enchantId = item.enchantId,
+                enchantName = item.enchantName,
             }
+            if item.gems and #item.gems > 0 then
+                gearEntry.gems = {}
+                for _, gem in ipairs(item.gems) do
+                    table.insert(gearEntry.gems, { id = gem.id, name = gem.name, icon = gem.icon })
+                end
+            end
+            clean.gear[slotId] = gearEntry
         end
     end
 

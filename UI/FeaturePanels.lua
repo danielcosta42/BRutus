@@ -270,14 +270,16 @@ function BRutus:CreateTrialsPanel(parent, _mainFrame)
 
     local hName = UI:CreateHeaderText(colHeader, "MEMBER", 10)
     hName:SetPoint("LEFT", 6, 0)
+    local hIlvl = UI:CreateHeaderText(colHeader, "iLVL", 10)
+    hIlvl:SetPoint("LEFT", 140, 0)
+    local hAtt = UI:CreateHeaderText(colHeader, "ATTUNE", 10)
+    hAtt:SetPoint("LEFT", 210, 0)
     local hSponsor = UI:CreateHeaderText(colHeader, "SPONSOR", 10)
-    hSponsor:SetPoint("LEFT", 180, 0)
-    local hStart = UI:CreateHeaderText(colHeader, "START", 10)
-    hStart:SetPoint("LEFT", 300, 0)
+    hSponsor:SetPoint("LEFT", 290, 0)
     local hDays = UI:CreateHeaderText(colHeader, "REMAINING", 10)
-    hDays:SetPoint("LEFT", 420, 0)
+    hDays:SetPoint("LEFT", 400, 0)
     local hStatus = UI:CreateHeaderText(colHeader, "STATUS", 10)
-    hStatus:SetPoint("LEFT", 530, 0)
+    hStatus:SetPoint("LEFT", 500, 0)
 
     local sep = UI:CreateSeparator(scrollParent)
     sep:SetPoint("TOPLEFT", 0, -50)
@@ -294,6 +296,7 @@ function BRutus:CreateTrialsPanel(parent, _mainFrame)
 
     parent.trialContent = trialContent
     parent.statusText = statusText
+    parent.expandedTrials = {}
 
     parent:SetScript("OnShow", function()
         BRutus:RefreshTrialsPanel(parent)
@@ -316,66 +319,92 @@ function BRutus:RefreshTrialsPanel(parent)
     end
     statusText:SetText(activeCount .. " active trials")
 
+    local expanded = parent.expandedTrials or {}
     local yOff = 0
+
     for _, trial in ipairs(trials) do
         local data = trial.data
-        local row = CreateFrame("Frame", nil, content, "BackdropTemplate")
+        local isExpanded = expanded[trial.key]
+        local memberData = BRutus.db.members[trial.key]
+        local progress = BRutus.TrialTracker:GetProgress(trial.key)
+
+        -- Main row
+        local row = CreateFrame("Button", nil, content, "BackdropTemplate")
         row:SetSize(content:GetWidth() - 10, 26)
         row:SetPoint("TOPLEFT", 0, -yOff)
         row:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
 
-        local altIdx = (math.floor(yOff / 26) % 2 == 0) and C.row1 or C.row2
+        local rowIdx = math.floor(yOff / 26) % 2
+        local altIdx = (rowIdx == 0) and C.row1 or C.row2
         row:SetBackdropColor(altIdx.r, altIdx.g, altIdx.b, altIdx.a)
+
+        -- Expand arrow
+        local arrow = UI:CreateText(row, isExpanded and "v" or ">", 10, C.accent.r, C.accent.g, C.accent.b)
+        arrow:SetPoint("LEFT", 2, 0)
 
         -- Name with class color
         local shortName = trial.key:match("^([^-]+)") or trial.key
-        local memberData = BRutus.db.members[trial.key]
         local pClass = memberData and memberData.class
         local pr, pg, pb = 1, 1, 1
         if pClass then pr, pg, pb = BRutus:GetClassColor(pClass) end
 
         local nameText = UI:CreateText(row, shortName, 10, pr, pg, pb)
-        nameText:SetPoint("LEFT", 6, 0)
+        nameText:SetPoint("LEFT", 14, 0)
+
+        -- iLvl with delta
+        if progress then
+            local ilvlSign = progress.ilvlDelta > 0 and "+" or ""
+            local ilvlColor = progress.ilvlDelta > 0 and C.green or (progress.ilvlDelta < 0 and C.red or C.silver)
+            local ilvlStr = format("%d (%s%d)", progress.currentIlvl, ilvlSign, progress.ilvlDelta)
+            local ilvlText = UI:CreateText(row, ilvlStr, 9, ilvlColor.r, ilvlColor.g, ilvlColor.b)
+            ilvlText:SetPoint("LEFT", 140, 0)
+
+            -- Attunement progress
+            local attColor = progress.attDelta > 0 and C.green or C.silver
+            local attStr = format("%d/%d (+%d)", progress.currentAttDone, progress.attTotal, progress.attDelta)
+            local attText = UI:CreateText(row, attStr, 9, attColor.r, attColor.g, attColor.b)
+            attText:SetPoint("LEFT", 210, 0)
+        else
+            local ilvlVal = memberData and memberData.avgIlvl or 0
+            if ilvlVal > 0 then
+                local ilvlText = UI:CreateText(row, tostring(ilvlVal), 9, C.silver.r, C.silver.g, C.silver.b)
+                ilvlText:SetPoint("LEFT", 140, 0)
+            end
+            local noProgText = UI:CreateText(row, "-", 9, C.silver.r, C.silver.g, C.silver.b)
+            noProgText:SetPoint("LEFT", 210, 0)
+        end
 
         local sponsorText = UI:CreateText(row, data.sponsor or "?", 10, C.silver.r, C.silver.g, C.silver.b)
-        sponsorText:SetPoint("LEFT", 180, 0)
-
-        local startStr = date("%m/%d/%y", data.startDate or 0)
-        local startText = UI:CreateText(row, startStr, 10, C.silver.r, C.silver.g, C.silver.b)
-        startText:SetPoint("LEFT", 300, 0)
+        sponsorText:SetPoint("LEFT", 290, 0)
 
         local daysRem = BRutus.TrialTracker:GetDaysRemaining(trial.key)
-        local daysStr = daysRem and (daysRem .. " days") or "-"
+        local daysStr = daysRem and (daysRem .. "d") or "-"
         local daysColor = C.white
         if daysRem then
             daysColor = daysRem > 14 and C.green or (daysRem > 7 and C.gold or C.red)
         end
         local daysText = UI:CreateText(row, daysStr, 10, daysColor.r, daysColor.g, daysColor.b)
-        daysText:SetPoint("LEFT", 420, 0)
+        daysText:SetPoint("LEFT", 400, 0)
 
         -- Status badge
         local statusColor = C.silver
         local statusStr = data.status or "?"
         if data.status == "trial" then
-            statusColor = C.gold
-            statusStr = "TRIAL"
+            statusColor = C.gold; statusStr = "TRIAL"
         elseif data.status == "approved" then
-            statusColor = C.green
-            statusStr = "APPROVED"
+            statusColor = C.green; statusStr = "APPROVED"
         elseif data.status == "denied" then
-            statusColor = C.red
-            statusStr = "DENIED"
+            statusColor = C.red; statusStr = "DENIED"
         elseif data.status == "expired" then
-            statusColor = C.red
-            statusStr = "EXPIRED"
+            statusColor = C.red; statusStr = "EXPIRED"
         end
         local sText = UI:CreateText(row, statusStr, 10, statusColor.r, statusColor.g, statusColor.b)
-        sText:SetPoint("LEFT", 530, 0)
+        sText:SetPoint("LEFT", 500, 0)
 
         -- Action buttons for active trials
         if data.status == "trial" then
             local approveBtn = UI:CreateButton(row, "OK", 30, 18)
-            approveBtn:SetPoint("LEFT", 620, 0)
+            approveBtn:SetPoint("LEFT", 580, 0)
             approveBtn:SetScript("OnClick", function()
                 BRutus.TrialTracker:UpdateStatus(trial.key, BRutus.TrialTracker.STATUS.APPROVED)
                 BRutus:RefreshTrialsPanel(parent)
@@ -389,7 +418,116 @@ function BRutus:RefreshTrialsPanel(parent)
             end)
         end
 
+        -- Click to expand/collapse
+        row:SetScript("OnClick", function()
+            expanded[trial.key] = not expanded[trial.key]
+            parent.expandedTrials = expanded
+            BRutus:RefreshTrialsPanel(parent)
+        end)
+
+        row:SetScript("OnEnter", function(self)
+            self:SetBackdropColor(C.rowHover.r, C.rowHover.g, C.rowHover.b, C.rowHover.a)
+        end)
+        row:SetScript("OnLeave", function(self)
+            self:SetBackdropColor(altIdx.r, altIdx.g, altIdx.b, altIdx.a)
+        end)
+
         yOff = yOff + 28
+
+        -- Expanded detail section
+        if isExpanded then
+            local detailFrame = CreateFrame("Frame", nil, content, "BackdropTemplate")
+            detailFrame:SetPoint("TOPLEFT", 10, -yOff)
+            detailFrame:SetPoint("TOPRIGHT", -10, -yOff)
+            detailFrame:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
+            detailFrame:SetBackdropColor(0.06, 0.06, 0.10, 0.8)
+
+            local dY = -6
+
+            -- Start date
+            local startStr = date("%m/%d/%y", data.startDate or 0)
+            local daysSince = BRutus.TrialTracker:GetDaysSinceStart(trial.key)
+            local infoFS = detailFrame:CreateFontString(nil, "OVERLAY")
+            infoFS:SetFont("Fonts\\FRIZQT__.TTF", 9, "")
+            infoFS:SetPoint("TOPLEFT", 10, dY)
+            infoFS:SetTextColor(C.silver.r, C.silver.g, C.silver.b)
+            infoFS:SetText(format("Started: %s  |  Day %d  |  Sponsor: %s", startStr, daysSince or 0, data.sponsor or "?"))
+            infoFS:Show()
+            dY = dY - 16
+
+            -- Officer comments
+            if data.notes and #data.notes > 0 then
+                local notesLabel = detailFrame:CreateFontString(nil, "OVERLAY")
+                notesLabel:SetFont("Fonts\\FRIZQT__.TTF", 9, "OUTLINE")
+                notesLabel:SetPoint("TOPLEFT", 10, dY)
+                notesLabel:SetTextColor(C.gold.r, C.gold.g, C.gold.b)
+                notesLabel:SetText("Comments:")
+                notesLabel:Show()
+                dY = dY - 14
+
+                for _, note in ipairs(data.notes) do
+                    local noteFS = detailFrame:CreateFontString(nil, "OVERLAY")
+                    noteFS:SetFont("Fonts\\FRIZQT__.TTF", 9, "")
+                    noteFS:SetPoint("TOPLEFT", 14, dY)
+                    noteFS:SetWidth(content:GetWidth() - 60)
+                    noteFS:SetJustifyH("LEFT")
+                    noteFS:SetWordWrap(true)
+                    local dateStr = note.timestamp and date("%m/%d %H:%M", note.timestamp) or ""
+                    noteFS:SetText(format("|cffAAAAAA[%s %s]|r %s", note.author or "?", dateStr, note.text or ""))
+                    noteFS:Show()
+                    dY = dY - (noteFS:GetStringHeight() + 3)
+                end
+            end
+
+            -- Inline add note
+            local addBox = CreateFrame("EditBox", nil, detailFrame, "BackdropTemplate")
+            addBox:SetSize(content:GetWidth() - 120, 20)
+            addBox:SetPoint("TOPLEFT", 10, dY - 4)
+            addBox:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
+            addBox:SetBackdropColor(0.04, 0.04, 0.07, 1)
+            addBox:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.3)
+            addBox:SetFont("Fonts\\FRIZQT__.TTF", 9, "")
+            addBox:SetTextColor(C.white.r, C.white.g, C.white.b)
+            addBox:SetTextInsets(4, 4, 2, 2)
+            addBox:SetAutoFocus(false)
+            addBox:SetMaxLetters(200)
+            addBox:Show()
+
+            local ph = addBox:CreateFontString(nil, "OVERLAY")
+            ph:SetFont("Fonts\\FRIZQT__.TTF", 9, "")
+            ph:SetPoint("LEFT", 4, 0)
+            ph:SetTextColor(0.3, 0.3, 0.3)
+            ph:SetText("Add comment...")
+            addBox:SetScript("OnTextChanged", function(self)
+                if self:GetText() ~= "" then ph:Hide() else ph:Show() end
+            end)
+            addBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+
+            local addBtn = UI:CreateButton(detailFrame, "Add", 50, 20)
+            addBtn:SetPoint("LEFT", addBox, "RIGHT", 4, 0)
+            addBtn:SetScript("OnClick", function()
+                local text = addBox:GetText()
+                if text and strtrim(text) ~= "" then
+                    BRutus.TrialTracker:AddTrialNote(trial.key, strtrim(text))
+                    addBox:SetText("")
+                    addBox:ClearFocus()
+                    BRutus:RefreshTrialsPanel(parent)
+                end
+            end)
+            addBox:SetScript("OnEnterPressed", function(self)
+                local text = self:GetText()
+                if text and strtrim(text) ~= "" then
+                    BRutus.TrialTracker:AddTrialNote(trial.key, strtrim(text))
+                    self:SetText("")
+                    self:ClearFocus()
+                    BRutus:RefreshTrialsPanel(parent)
+                end
+            end)
+
+            dY = dY - 30
+            detailFrame:SetHeight(math.abs(dY) + 6)
+            yOff = yOff + math.abs(dY) + 8
+        end
     end
 
     if #trials == 0 then

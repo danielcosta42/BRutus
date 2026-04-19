@@ -9,19 +9,20 @@ BRutus.RecipeTracker = RecipeTracker
 -- Initialize
 ----------------------------------------------------------------------
 function RecipeTracker:Initialize()
+    self.scanPending = false
+    self.lastScanTime = {}
+
     local frame = CreateFrame("Frame")
     frame:RegisterEvent("TRADE_SKILL_SHOW")
-    frame:RegisterEvent("TRADE_SKILL_UPDATE")
     frame:RegisterEvent("TRADE_SKILL_CLOSE")
     -- Craft API events (Enchanting in some clients)
     frame:RegisterEvent("CRAFT_SHOW")
-    frame:RegisterEvent("CRAFT_UPDATE")
     frame:RegisterEvent("CRAFT_CLOSE")
     frame:SetScript("OnEvent", function(_, event)
-        if event == "TRADE_SKILL_SHOW" or event == "TRADE_SKILL_UPDATE" then
-            C_Timer.After(0.3, function() RecipeTracker:ScanTradeSkill() end)
-        elseif event == "CRAFT_SHOW" or event == "CRAFT_UPDATE" then
-            C_Timer.After(0.3, function() RecipeTracker:ScanCraft() end)
+        if event == "TRADE_SKILL_SHOW" then
+            RecipeTracker:DebounceScan("trade")
+        elseif event == "CRAFT_SHOW" then
+            RecipeTracker:DebounceScan("craft")
         end
     end)
 
@@ -29,6 +30,24 @@ function RecipeTracker:Initialize()
     if not BRutusDB.recipes then
         BRutusDB.recipes = {}
     end
+end
+
+local SCAN_COOLDOWN = 5 -- seconds between scans of the same type
+
+function RecipeTracker:DebounceScan(scanType)
+    local now = GetTime()
+    if self.lastScanTime[scanType] and (now - self.lastScanTime[scanType]) < SCAN_COOLDOWN then
+        return
+    end
+    self.lastScanTime[scanType] = now
+
+    C_Timer.After(0.3, function()
+        if scanType == "trade" then
+            RecipeTracker:ScanTradeSkill()
+        elseif scanType == "craft" then
+            RecipeTracker:ScanCraft()
+        end
+    end)
 end
 
 ----------------------------------------------------------------------
@@ -119,7 +138,18 @@ function RecipeTracker:StoreMyRecipes(profName, recipes)
     end
     BRutusDB.recipes[key][profName] = recipes
 
+    -- Track scan timestamps per profession
+    if not BRutusDB.recipeScanTimes then
+        BRutusDB.recipeScanTimes = {}
+    end
+    BRutusDB.recipeScanTimes[profName] = time()
+
     BRutus:Print(string.format("|cff00ff00Recipes scanned:|r %d %s recipes indexed.", #recipes, profName))
+
+    -- Dismiss the profession reminder if all professions are now scanned
+    if BRutus.profReminderFrame then
+        BRutus:CheckAndDismissProfessionReminder()
+    end
 
     -- Broadcast to guild
     self:BroadcastRecipes(profName, recipes)

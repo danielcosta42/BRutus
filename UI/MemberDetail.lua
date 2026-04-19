@@ -451,6 +451,103 @@ function PopulateDetail(frame, data)
             infoStr:SetText("Sponsor: " .. (trial.sponsor or "?") .. "  |  Day " .. (daysSince or 0))
             infoStr:Show()
             yOff = yOff - 20
+
+            -- Progress tracking
+            local progress = BRutus.TrialTracker:GetProgress(playerKey)
+            if progress then
+                -- iLvl progress
+                local ilvlColor = progress.ilvlDelta > 0 and C.green or (progress.ilvlDelta < 0 and C.red or C.silver)
+                local ilvlSign = progress.ilvlDelta > 0 and "+" or ""
+                local ilvlStr = format("iLvl: %d >> %d  (%s%d)", progress.startIlvl, progress.currentIlvl, ilvlSign, progress.ilvlDelta)
+                local ilvlText = child:CreateFontString(nil, "OVERLAY")
+                ilvlText:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
+                ilvlText:SetPoint("TOPLEFT", 15, yOff - 3)
+                ilvlText:SetTextColor(ilvlColor.r, ilvlColor.g, ilvlColor.b)
+                ilvlText:SetText(ilvlStr)
+                ilvlText:Show()
+
+                -- Attunement progress
+                local attColor = progress.attDelta > 0 and C.green or C.silver
+                local attStr = format("Attunements: %d/%d >> %d/%d  (+%d)", progress.startAttDone, progress.attTotal, progress.currentAttDone, progress.attTotal, progress.attDelta)
+                local attText = child:CreateFontString(nil, "OVERLAY")
+                attText:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
+                attText:SetPoint("TOPLEFT", contentWidth / 2, yOff - 3)
+                attText:SetTextColor(attColor.r, attColor.g, attColor.b)
+                attText:SetText(attStr)
+                attText:Show()
+                yOff = yOff - 16
+            end
+
+            -- Trial notes (all of them, not just 3)
+            if trial.notes and #trial.notes > 0 then
+                local notesLabel = child:CreateFontString(nil, "OVERLAY")
+                notesLabel:SetFont("Fonts\\FRIZQT__.TTF", 9, "OUTLINE")
+                notesLabel:SetPoint("TOPLEFT", 15, yOff - 6)
+                notesLabel:SetTextColor(C.gold.r, C.gold.g, C.gold.b)
+                notesLabel:SetText("Officer Comments (" .. #trial.notes .. ")")
+                notesLabel:Show()
+                yOff = yOff - 18
+
+                for _, note in ipairs(trial.notes) do
+                    local noteFS = child:CreateFontString(nil, "OVERLAY")
+                    noteFS:SetFont("Fonts\\FRIZQT__.TTF", 9, "")
+                    noteFS:SetPoint("TOPLEFT", 20, yOff - 2)
+                    noteFS:SetWidth(contentWidth - 40)
+                    noteFS:SetJustifyH("LEFT")
+                    noteFS:SetWordWrap(true)
+                    local dateStr = note.timestamp and date("%m/%d %H:%M", note.timestamp) or ""
+                    noteFS:SetText(format("|cffAAAAAA[%s %s]|r %s", note.author or "?", dateStr, note.text or ""))
+                    noteFS:Show()
+                    yOff = yOff - (noteFS:GetStringHeight() + 4)
+                end
+            end
+
+            -- Add note input
+            local addNoteBox = CreateFrame("EditBox", nil, child, "BackdropTemplate")
+            addNoteBox:SetSize(contentWidth - 100, 22)
+            addNoteBox:SetPoint("TOPLEFT", 15, yOff - 8)
+            addNoteBox:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
+            addNoteBox:SetBackdropColor(0.05, 0.05, 0.08, 1)
+            addNoteBox:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.4)
+            addNoteBox:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
+            addNoteBox:SetTextColor(C.white.r, C.white.g, C.white.b)
+            addNoteBox:SetTextInsets(6, 6, 2, 2)
+            addNoteBox:SetAutoFocus(false)
+            addNoteBox:SetMaxLetters(200)
+            addNoteBox:Show()
+
+            local placeholder = addNoteBox:CreateFontString(nil, "OVERLAY")
+            placeholder:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
+            placeholder:SetPoint("LEFT", 6, 0)
+            placeholder:SetTextColor(0.35, 0.35, 0.35)
+            placeholder:SetText("Add officer comment...")
+            addNoteBox:SetScript("OnTextChanged", function(self)
+                if self:GetText() ~= "" then placeholder:Hide() else placeholder:Show() end
+            end)
+            addNoteBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+
+            local addBtn = UI:CreateButton(child, "Add", 60, 22)
+            addBtn:SetPoint("LEFT", addNoteBox, "RIGHT", 6, 0)
+            addBtn:SetScript("OnClick", function()
+                local text = addNoteBox:GetText()
+                if text and strtrim(text) ~= "" then
+                    BRutus.TrialTracker:AddTrialNote(playerKey, strtrim(text))
+                    addNoteBox:SetText("")
+                    addNoteBox:ClearFocus()
+                    PopulateDetail(frame, data)
+                end
+            end)
+            addNoteBox:SetScript("OnEnterPressed", function(self)
+                local text = self:GetText()
+                if text and strtrim(text) ~= "" then
+                    BRutus.TrialTracker:AddTrialNote(playerKey, strtrim(text))
+                    self:SetText("")
+                    self:ClearFocus()
+                    PopulateDetail(frame, data)
+                end
+            end)
+
+            yOff = yOff - 36
         end
     end
 
@@ -529,11 +626,38 @@ function CreateSectionHeader(parent, text, yOff, width)
 end
 
 ----------------------------------------------------------------------
--- Create a gear slot row
+-- Create a gear slot row (with enchant & gem display)
 ----------------------------------------------------------------------
+
+-- Slots that should have an enchant in TBC
+local ENCHANTABLE_SLOTS = {
+    [1] = true,   -- Head (glyph)
+    [3] = true,   -- Shoulder (inscription)
+    [5] = true,   -- Chest
+    [6] = true,   -- Waist (TBC - belt buckle not available, optional)
+    [7] = true,   -- Legs (armor kit / spellthread)
+    [8] = true,   -- Feet
+    [9] = true,   -- Wrist
+    [10] = true,  -- Hands
+    [15] = true,  -- Back
+    [11] = true,  -- Ring1 (enchanter only, skip warning)
+    [12] = true,  -- Ring2
+    [16] = true,  -- Main Hand
+    [17] = true,  -- Off Hand (shield/weapon)
+    [18] = true,  -- Ranged
+}
+
+-- Slots where missing enchant is a serious issue
+local ENCHANT_WARNING_SLOTS = {
+    [1] = true, [3] = true, [5] = true, [7] = true, [8] = true,
+    [9] = true, [10] = true, [15] = true, [16] = true,
+}
+
 function CreateGearRow(parent, slotId, item, yOff, width)
     local ROW_H = 26
+    local subRowH = 14
     local slotName = BRutus.SlotNames[slotId] or "Slot " .. slotId
+    local hasExtra = false
 
     -- Slot label
     local slotLabel = parent:CreateFontString(nil, "OVERLAY")
@@ -559,12 +683,24 @@ function CreateGearRow(parent, slotId, item, yOff, width)
         local nameText = parent:CreateFontString(nil, "OVERLAY")
         nameText:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
         nameText:SetPoint("TOPLEFT", 106, yOff - 5)
-        nameText:SetWidth(width - 170)
         nameText:SetJustifyH("LEFT")
         nameText:SetWordWrap(false)
         nameText:SetTextColor(qColor.r, qColor.g, qColor.b)
         nameText:SetText(item.name)
         nameText:Show()
+
+        -- Gem icons — inline after item name on the same row
+        local gemAnchor = nameText
+        if item.gems and #item.gems > 0 then
+            for _, gem in ipairs(item.gems) do
+                if gem.icon and gem.icon ~= "" then
+                    local gemFrame = UI:CreateIcon(parent, 12, gem.icon)
+                    gemFrame:SetPoint("LEFT", gemAnchor, "RIGHT", 4, 0)
+                    gemFrame:Show()
+                    gemAnchor = gemFrame
+                end
+            end
+        end
 
         -- Item level
         local ilvlText = parent:CreateFontString(nil, "OVERLAY")
@@ -572,25 +708,55 @@ function CreateGearRow(parent, slotId, item, yOff, width)
         ilvlText:SetPoint("TOPRIGHT", -10, yOff - 5)
         ilvlText:SetText(BRutus:FormatItemLevel(item.ilvl))
         ilvlText:Show()
+
+        -- Enchant line — sub-row below item name
+        local enchantY = yOff - ROW_H
+        if item.enchantName then
+            local enchText = parent:CreateFontString(nil, "OVERLAY")
+            enchText:SetFont("Fonts\\FRIZQT__.TTF", 9, "")
+            enchText:SetPoint("TOPLEFT", 106, enchantY)
+            enchText:SetTextColor(0.0, 0.8, 0.0)
+            enchText:SetText(item.enchantName)
+            enchText:Show()
+            hasExtra = true
+        elseif item.enchantId and item.enchantId > 0 then
+            local enchText = parent:CreateFontString(nil, "OVERLAY")
+            enchText:SetFont("Fonts\\FRIZQT__.TTF", 9, "")
+            enchText:SetPoint("TOPLEFT", 106, enchantY)
+            enchText:SetTextColor(0.0, 0.8, 0.0)
+            enchText:SetText("Enchanted")
+            enchText:Show()
+            hasExtra = true
+        elseif ENCHANT_WARNING_SLOTS[slotId] then
+            local warnText = parent:CreateFontString(nil, "OVERLAY")
+            warnText:SetFont("Fonts\\FRIZQT__.TTF", 9, "")
+            warnText:SetPoint("TOPLEFT", 106, enchantY)
+            warnText:SetTextColor(C.red.r, C.red.g, C.red.b, 0.7)
+            warnText:SetText("Not enchanted")
+            warnText:Show()
+            hasExtra = true
+        end
     else
         -- Empty slot
         local emptyText = parent:CreateFontString(nil, "OVERLAY")
         emptyText:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
         emptyText:SetPoint("TOPLEFT", 82, yOff - 5)
         emptyText:SetTextColor(0.3, 0.3, 0.3)
-         emptyText:SetText("- Empty -")
+        emptyText:SetText("- Empty -")
         emptyText:Show()
     end
+
+    local totalH = ROW_H + (hasExtra and subRowH or 0)
 
     -- Separator
     local sep = parent:CreateTexture(nil, "ARTWORK")
     sep:SetTexture("Interface\\Buttons\\WHITE8x8")
-    sep:SetPoint("TOPLEFT", 10, yOff - ROW_H)
+    sep:SetPoint("TOPLEFT", 10, yOff - totalH)
     sep:SetSize(width - 20, 1)
     sep:SetVertexColor(C.separator.r, C.separator.g, C.separator.b, 0.2)
     sep:Show()
 
-    return yOff - ROW_H
+    return yOff - totalH
 end
 
 ----------------------------------------------------------------------

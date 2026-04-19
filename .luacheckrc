@@ -232,6 +232,7 @@ read_globals = {
     "SetItemRef",
 
     -- Tooltip frames
+    "GameTooltipTemplate",
     "ItemRefTooltip",
     "ShoppingTooltip1",
     "ShoppingTooltip2",
