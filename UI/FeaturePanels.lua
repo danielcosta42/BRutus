@@ -662,6 +662,7 @@ function BRutus:RefreshSettingsPanel(content)
         }
     end
     local mods = BRutus.db.settings.modules
+    local isOfficer = BRutus:IsOfficer()
 
     local modules = {
         { key = "raidTracker",       label = "Raid Tracker",         desc = "Track raid attendance, penalties, and sessions" },
@@ -669,13 +670,14 @@ function BRutus:RefreshSettingsPanel(content)
         { key = "lootMaster",        label = "Loot Master",          desc = "Master Loot with TMB auto-council" },
         { key = "consumableChecker", label = "Consumable Checker",   desc = "Scan raid for missing flasks/food/elixirs" },
         { key = "tmb",               label = "TMB Integration",      desc = "That's My BiS wishlist/prio import" },
-        { key = "trialTracker",      label = "Trial Tracker",        desc = "Track trial member progress (officer)" },
-        { key = "officerNotes",      label = "Officer Notes",        desc = "Private notes on guild members (officer)" },
-        { key = "recruitment",       label = "Recruitment",          desc = "Auto-post recruitment messages (officer)" },
+        { key = "trialTracker",      label = "Trial Tracker",        desc = "Track trial member progress (officer)", officerOnly = true },
+        { key = "officerNotes",      label = "Officer Notes",        desc = "Private notes on guild members (officer)", officerOnly = true },
+        { key = "recruitment",       label = "Recruitment",          desc = "Auto-post recruitment messages (officer)", officerOnly = true },
         { key = "commSystem",        label = "Comm System",          desc = "Sync member data between addon users" },
     }
 
     for _, mod in ipairs(modules) do
+        if not mod.officerOnly or isOfficer then
         local row = CreateFrame("Frame", nil, content, "BackdropTemplate")
         row:SetSize(content:GetWidth() - 10, 36)
         row:SetPoint("TOPLEFT", 0, -yOff)
@@ -699,6 +701,7 @@ function BRutus:RefreshSettingsPanel(content)
         desc:SetWidth(400)
 
         yOff = yOff + 38
+        end
     end
 
     yOff = yOff + 8
@@ -709,8 +712,9 @@ function BRutus:RefreshSettingsPanel(content)
     sep2:SetPoint("TOPRIGHT", -10, -yOff)
     yOff = yOff + 12
 
+    if isOfficer then
     --------------------------------------------------------------------
-    -- LOOT MASTER SETTINGS
+    -- LOOT MASTER SETTINGS (officer only)
     --------------------------------------------------------------------
     local lmTitle = UI:CreateHeaderText(content, "LOOT MASTER", 12)
     lmTitle:SetPoint("TOPLEFT", 0, -yOff)
@@ -773,6 +777,8 @@ function BRutus:RefreshSettingsPanel(content)
     sep3:SetPoint("TOPRIGHT", -10, -yOff)
     yOff = yOff + 12
 
+    end -- isOfficer (Loot Master settings)
+
     --------------------------------------------------------------------
     -- RAID TRACKER SETTINGS
     --------------------------------------------------------------------
@@ -801,8 +807,9 @@ function BRutus:RefreshSettingsPanel(content)
     sep4:SetPoint("TOPRIGHT", -10, -yOff)
     yOff = yOff + 12
 
+    if isOfficer then
     --------------------------------------------------------------------
-    -- TEST FUNCTIONS
+    -- TEST FUNCTIONS (officer only)
     --------------------------------------------------------------------
     local testTitle = UI:CreateHeaderText(content, "TEST FUNCTIONS", 12)
     testTitle:SetPoint("TOPLEFT", 0, -yOff)
@@ -955,6 +962,8 @@ function BRutus:RefreshSettingsPanel(content)
     local testExpDesc = UI:CreateText(content, "Opens the TMB attendance export window", 9, C.silver.r, C.silver.g, C.silver.b)
     testExpDesc:SetPoint("LEFT", testExport, "RIGHT", 10, 0)
     yOff = yOff + 32
+
+    end -- isOfficer (Test Functions)
 
     yOff = yOff + 8
     local sep5 = UI:CreateSeparator(content)

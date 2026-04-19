@@ -182,7 +182,7 @@ function CommSystem:OnMessageReceived(msg, _, sender)
             BRutus.RecipeTracker:HandleIncoming(sender, data)
         end
     elseif msgType == "TR" then
-        if BRutus.TrialTracker then
+        if BRutus.TrialTracker and BRutus:IsOfficer() then
             BRutus.TrialTracker:HandleIncoming(data)
         end
     end

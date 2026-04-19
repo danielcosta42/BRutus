@@ -210,7 +210,7 @@ function BRutus:OnLogin()
         return self.db.settings.modules[key] ~= false
     end
 
-    -- Initialize subsystems
+    -- Initialize subsystems (always-on)
     if BRutus.DataCollector then
         BRutus.DataCollector:Initialize()
     end
@@ -219,9 +219,6 @@ function BRutus:OnLogin()
     end
     if BRutus.CommSystem and modEnabled("commSystem") then
         BRutus.CommSystem:Initialize()
-    end
-    if BRutus.Recruitment and modEnabled("recruitment") then
-        BRutus.Recruitment:Initialize()
     end
     if BRutus.TMB and modEnabled("tmb") then
         BRutus.TMB:Initialize()
@@ -235,19 +232,28 @@ function BRutus:OnLogin()
     if BRutus.LootMaster and modEnabled("lootMaster") then
         BRutus.LootMaster:Initialize()
     end
-    if BRutus.OfficerNotes and modEnabled("officerNotes") then
-        BRutus.OfficerNotes:Initialize()
-    end
-    if BRutus.TrialTracker and modEnabled("trialTracker") then
-        BRutus.TrialTracker:Initialize()
-        BRutus.TrialTracker:CheckExpired()
-    end
     if BRutus.ConsumableChecker and modEnabled("consumableChecker") then
         BRutus.ConsumableChecker:Initialize()
     end
     if BRutus.RecipeTracker then
         BRutus.RecipeTracker:Initialize()
     end
+
+    -- Officer-only modules: defer init until guild info is available
+    C_Timer.After(5, function()
+        if not BRutus:IsOfficer() then return end
+
+        if BRutus.Recruitment and modEnabled("recruitment") then
+            BRutus.Recruitment:Initialize()
+        end
+        if BRutus.OfficerNotes and modEnabled("officerNotes") then
+            BRutus.OfficerNotes:Initialize()
+        end
+        if BRutus.TrialTracker and modEnabled("trialTracker") then
+            BRutus.TrialTracker:Initialize()
+            BRutus.TrialTracker:CheckExpired()
+        end
+    end)
 
 
     -- Hook chat player links for guild invite
