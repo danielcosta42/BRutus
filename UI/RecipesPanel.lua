@@ -253,7 +253,7 @@ function BRutus:CreateRecipesPanel(parent, _mainFrame)
     local hProfession = UI:CreateHeaderText(headerFrame, "PROFESSION", 10)
     hProfession:SetPoint("LEFT", 400, 0)
 
-    local hPlayer = UI:CreateHeaderText(headerFrame, "CRAFTER", 10)
+    local hPlayer = UI:CreateHeaderText(headerFrame, "CRAFTERS", 10)
     hPlayer:SetPoint("LEFT", 560, 0)
 
     local hAction = UI:CreateHeaderText(headerFrame, "", 10)
@@ -315,6 +315,7 @@ function BRutus:CreateRecipesPanel(parent, _mainFrame)
         playerName:SetPoint("LEFT", 560, 0)
         playerName:SetWidth(140)
         playerName:SetJustifyH("LEFT")
+        playerName:SetWordWrap(false)
         row.playerName = playerName
 
         -- Whisper button
@@ -332,7 +333,7 @@ function BRutus:CreateRecipesPanel(parent, _mainFrame)
                 GameTooltip:SetItemByID(self.data.itemId)
                 GameTooltip:Show()
             end
-            if self.data and self.data.isOnline then
+            if self.firstOnlineCrafter then
                 self.whisperBtn:Show()
             end
         end
@@ -386,7 +387,7 @@ function BRutus:CreateRecipesPanel(parent, _mainFrame)
                 row:SetBackdropColor(bg.r, bg.g, bg.b, bg.a)
 
                 -- Online status dot
-                if entry.isOnline then
+                if entry.hasOnline then
                     row.statusDot:SetVertexColor(C.online.r, C.online.g, C.online.b, 1.0)
                 else
                     row.statusDot:SetVertexColor(C.offline.r, C.offline.g, C.offline.b, 0.5)
@@ -408,23 +409,29 @@ function BRutus:CreateRecipesPanel(parent, _mainFrame)
                 row.profName:SetText(entry.profName or "")
                 row.profName:SetTextColor(pc.r, pc.g, pc.b)
 
-                -- Player name with class color
-                local playerKey = entry.playerKey
-                local memberData = BRutus.db.members[playerKey]
-                local pClass = memberData and memberData.class
-                local cc = pClass and BRutus.ClassColors[pClass] or C.white
-                row.playerName:SetText(entry.playerName or "?")
-                row.playerName:SetTextColor(cc.r, cc.g, cc.b)
-                if not entry.isOnline then
-                    row.playerName:SetAlpha(0.5)
-                else
-                    row.playerName:SetAlpha(1.0)
+                -- Crafters list (grouped, class-colored)
+                local crafterParts = {}
+                local firstOnlineCrafter = nil
+                for _, crafter in ipairs(entry.crafters or {}) do
+                    local memberData = BRutus.db.members[crafter.playerKey]
+                    local pClass = memberData and memberData.class
+                    local cc = pClass and BRutus.ClassColors[pClass] or C.white
+                    local hex = string.format("%02x%02x%02x", cc.r * 255, cc.g * 255, cc.b * 255)
+                    local alpha = crafter.isOnline and "" or "|cff666666"
+                    local resetAlpha = crafter.isOnline and "" or "|r"
+                    table.insert(crafterParts, alpha .. "|cff" .. hex .. crafter.playerName .. "|r" .. resetAlpha)
+                    if crafter.isOnline and not firstOnlineCrafter then
+                        firstOnlineCrafter = crafter.playerName
+                    end
                 end
+                row.playerName:SetText(table.concat(crafterParts, ", "))
+                row.playerName:SetAlpha(1.0)
 
-                -- Whisper button
+                -- Whisper button — whisper first online crafter
+                row.firstOnlineCrafter = firstOnlineCrafter
                 row.whisperBtn:SetScript("OnClick", function()
-                    if entry.playerName then
-                        ChatFrame_OpenChat("/w " .. entry.playerName .. " ")
+                    if firstOnlineCrafter then
+                        ChatFrame_OpenChat("/w " .. firstOnlineCrafter .. " ")
                     end
                 end)
                 row.whisperBtn:Hide()

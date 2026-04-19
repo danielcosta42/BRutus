@@ -217,21 +217,32 @@ end
 -- Returns: { { recipeName, itemId, spellId, playerKey, playerName, profName }, ... }
 ----------------------------------------------------------------------
 function RecipeTracker:BuildRecipeIndex()
-    local index = {}
+    local grouped = {}
     for playerKey, professions in pairs(BRutusDB.recipes or {}) do
         local playerName = playerKey:match("^([^-]+)") or playerKey
         for profName, recipes in pairs(professions) do
             for _, recipe in ipairs(recipes) do
-                table.insert(index, {
-                    name = recipe.name,
-                    itemId = recipe.itemId,
-                    spellId = recipe.spellId,
+                local key = (recipe.name or "") .. "|" .. profName
+                if not grouped[key] then
+                    grouped[key] = {
+                        name = recipe.name,
+                        itemId = recipe.itemId,
+                        spellId = recipe.spellId,
+                        profName = profName,
+                        crafters = {},
+                    }
+                end
+                table.insert(grouped[key].crafters, {
                     playerKey = playerKey,
                     playerName = playerName,
-                    profName = profName,
                 })
             end
         end
+    end
+
+    local index = {}
+    for _, entry in pairs(grouped) do
+        table.insert(index, entry)
     end
     return index
 end
@@ -256,16 +267,26 @@ function RecipeTracker:Search(query, profFilter)
         end
 
         if passProf and passQuery then
-            entry.isOnline = onlineSet[entry.playerName] or false
+            -- Mark which crafters are online
+            local hasOnline = false
+            for _, crafter in ipairs(entry.crafters) do
+                crafter.isOnline = onlineSet[crafter.playerName] or false
+                if crafter.isOnline then hasOnline = true end
+            end
+            -- Sort crafters: online first, then alphabetical
+            table.sort(entry.crafters, function(a, b)
+                if a.isOnline ~= b.isOnline then return a.isOnline end
+                return a.playerName < b.playerName
+            end)
+            entry.hasOnline = hasOnline
             table.insert(results, entry)
         end
     end
 
-    -- Sort: online first, then recipe name, then player name
+    -- Sort: recipes with online crafters first, then by name
     table.sort(results, function(a, b)
-        if a.isOnline ~= b.isOnline then return a.isOnline end
-        if a.name ~= b.name then return a.name < b.name end
-        return a.playerName < b.playerName
+        if a.hasOnline ~= b.hasOnline then return a.hasOnline end
+        return a.name < b.name
     end)
 
     return results
