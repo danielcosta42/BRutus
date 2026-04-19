@@ -421,7 +421,15 @@ function BRutus:ToggleRoster()
             C_GuildInfo.GuildRoster()
         end
         self.RosterFrame:UpdateTabVisibility()
-        self.RosterFrame:SetActiveTab(self.RosterFrame.activeTab or "roster")
+        -- Reset to roster if current tab is officer-only and player isn't officer
+        local currentTab = self.RosterFrame.activeTab or "roster"
+        for _, tab in ipairs(self.RosterFrame.tabs) do
+            if tab.key == currentTab and tab.officerOnly and not self:IsOfficer() then
+                currentTab = "roster"
+                break
+            end
+        end
+        self.RosterFrame:SetActiveTab(currentTab)
         self.RosterFrame:Show()
         self.RosterFrame:RefreshRoster()
     end
@@ -438,8 +446,8 @@ function BRutus:IsOfficer()
     if not IsInGuild() then return false end
     local _, _, rankIndex = GetGuildInfo("player")
     if not rankIndex then return false end
-    -- Check by rank index OR by CanGuildInvite permission
-    return rankIndex <= 2 or CanGuildInvite()
+    -- Ranks 0-2: GM Estrategista, Doutrinador, Oficial
+    return rankIndex <= 2
 end
 
 function BRutus:DeepCopy(orig)

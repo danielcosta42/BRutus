@@ -56,8 +56,10 @@ end
 function RecipeTracker:ScanTradeSkill()
     if not GetTradeSkillLine then return end
 
-    local skillName = GetTradeSkillLine()
-    if not skillName or skillName == "" or skillName == "UNKNOWN" then return end
+    local rawSkillName = GetTradeSkillLine()
+    if not rawSkillName or rawSkillName == "" or rawSkillName == "UNKNOWN" then return end
+
+    local skillName = BRutus.DataCollector:GetCanonicalProfName(rawSkillName)
 
     local numSkills = GetNumTradeSkills and GetNumTradeSkills() or 0
     if numSkills == 0 then return end
@@ -94,8 +96,10 @@ end
 function RecipeTracker:ScanCraft()
     if not GetCraftDisplaySkillLine then return end
 
-    local skillName = GetCraftDisplaySkillLine()
-    if not skillName or skillName == "" or skillName == "UNKNOWN" then return end
+    local rawSkillName = GetCraftDisplaySkillLine()
+    if not rawSkillName or rawSkillName == "" or rawSkillName == "UNKNOWN" then return end
+
+    local skillName = BRutus.DataCollector:GetCanonicalProfName(rawSkillName)
 
     local numCrafts = GetNumCrafts and GetNumCrafts() or 0
     if numCrafts == 0 then return end
@@ -136,6 +140,17 @@ function RecipeTracker:StoreMyRecipes(profName, recipes)
     if not BRutusDB.recipes[key] then
         BRutusDB.recipes[key] = {}
     end
+
+    -- Remove old localized keys that map to the same canonical profession
+    local DC = BRutus.DataCollector
+    if DC and DC.GetCanonicalProfName then
+        for oldKey, _ in pairs(BRutusDB.recipes[key]) do
+            if oldKey ~= profName and DC:GetCanonicalProfName(oldKey) == profName then
+                BRutusDB.recipes[key][oldKey] = nil
+            end
+        end
+    end
+
     BRutusDB.recipes[key][profName] = recipes
 
     -- Track scan timestamps per profession
@@ -183,6 +198,12 @@ function RecipeTracker:HandleIncoming(sender, data)
     local recipes = recipeData.recipes
     if not profName or not recipes then return end
 
+    -- Normalize profession name to canonical English
+    local DC = BRutus.DataCollector
+    if DC and DC.GetCanonicalProfName then
+        profName = DC:GetCanonicalProfName(profName)
+    end
+
     -- Build player key from sender
     local senderName = sender:match("^([^-]+)") or sender
     local realm = sender:match("-(.+)$") or GetRealmName()
@@ -191,6 +212,14 @@ function RecipeTracker:HandleIncoming(sender, data)
     if not BRutusDB.recipes[key] then
         BRutusDB.recipes[key] = {}
     end
+
+    -- Remove old localized keys that map to the same canonical profession
+    for oldKey, _ in pairs(BRutusDB.recipes[key]) do
+        if oldKey ~= profName and DC and DC:GetCanonicalProfName(oldKey) == profName then
+            BRutusDB.recipes[key][oldKey] = nil
+        end
+    end
+
     BRutusDB.recipes[key][profName] = recipes
 end
 
@@ -200,11 +229,13 @@ end
 function RecipeTracker:GetAllProfessions()
     local profs = {}
     local seen = {}
+    local DC = BRutus.DataCollector
     for _, playerRecipes in pairs(BRutusDB.recipes or {}) do
         for profName, _ in pairs(playerRecipes) do
-            if not seen[profName] then
-                seen[profName] = true
-                table.insert(profs, profName)
+            local canonical = DC and DC.GetCanonicalProfName and DC:GetCanonicalProfName(profName) or profName
+            if not seen[canonical] then
+                seen[canonical] = true
+                table.insert(profs, canonical)
             end
         end
     end
@@ -213,35 +244,68 @@ function RecipeTracker:GetAllProfessions()
 end
 
 ----------------------------------------------------------------------
--- Build a flat searchable list of all recipes
--- Returns: { { recipeName, itemId, spellId, playerKey, playerName, profName }, ... }
+-- Build a flat searchable list of all recipes (grouped by ID)
+-- Groups by spellId or itemId to be locale-independent.
+-- Resolves display name via GetSpellInfo/GetItemInfo for the local client.
 ----------------------------------------------------------------------
 function RecipeTracker:BuildRecipeIndex()
     local grouped = {}
+    local DC = BRutus.DataCollector
     for playerKey, professions in pairs(BRutusDB.recipes or {}) do
         local playerName = playerKey:match("^([^-]+)") or playerKey
         for profName, recipes in pairs(professions) do
+            local canonical = DC and DC.GetCanonicalProfName and DC:GetCanonicalProfName(profName) or profName
             for _, recipe in ipairs(recipes) do
-                local key = (recipe.name or "") .. "|" .. profName
-                if not grouped[key] then
-                    grouped[key] = {
-                        name = recipe.name,
+                -- Use spellId as primary key, fall back to itemId, then name
+                local recipeKey
+                if recipe.spellId then
+                    recipeKey = "s" .. recipe.spellId .. "|" .. canonical
+                elseif recipe.itemId then
+                    recipeKey = "i" .. recipe.itemId .. "|" .. canonical
+                else
+                    recipeKey = "n" .. (recipe.name or "") .. "|" .. canonical
+                end
+
+                if not grouped[recipeKey] then
+                    -- Resolve localized display name for local client
+                    local displayName = recipe.name -- fallback
+                    if recipe.spellId then
+                        local spellName = GetSpellInfo(recipe.spellId)
+                        if spellName and spellName ~= "" then
+                            displayName = spellName
+                        end
+                    end
+                    if recipe.itemId and (not displayName or displayName == recipe.name) then
+                        local itemName = GetItemInfo(recipe.itemId)
+                        if itemName and itemName ~= "" then
+                            displayName = itemName
+                        end
+                    end
+
+                    grouped[recipeKey] = {
+                        name = displayName or recipe.name or "?",
                         itemId = recipe.itemId,
                         spellId = recipe.spellId,
-                        profName = profName,
+                        profName = canonical,
                         crafters = {},
+                        _crafterSeen = {},
                     }
                 end
-                table.insert(grouped[key].crafters, {
-                    playerKey = playerKey,
-                    playerName = playerName,
-                })
+                -- Deduplicate: skip if this player already added for this recipe
+                if not grouped[recipeKey]._crafterSeen[playerKey] then
+                    grouped[recipeKey]._crafterSeen[playerKey] = true
+                    table.insert(grouped[recipeKey].crafters, {
+                        playerKey = playerKey,
+                        playerName = playerName,
+                    })
+                end
             end
         end
     end
 
     local index = {}
     for _, entry in pairs(grouped) do
+        entry._crafterSeen = nil -- clean up temp field
         table.insert(index, entry)
     end
     return index

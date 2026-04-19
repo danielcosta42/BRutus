@@ -203,9 +203,16 @@ function BRutus:RefreshLootPanel(content, countText)
         local altIdx = (math.floor(yOff / 22) % 2 == 0) and C.row1 or C.row2
         row:SetBackdropColor(altIdx.r, altIdx.g, altIdx.b, altIdx.a)
 
-        -- Item name with quality color
+        -- Item name with quality color (resolved from itemLink for locale)
         local qColor = BRutus.QualityColors[entry.quality] or BRutus.QualityColors[1]
-        local itemText = UI:CreateText(row, entry.itemName or "?", 10, qColor.r, qColor.g, qColor.b)
+        local displayName = entry.itemName or "?"
+        if entry.itemLink then
+            local localName = entry.itemLink:match("%[(.-)%]")
+            if localName and localName ~= "" then
+                displayName = localName
+            end
+        end
+        local itemText = UI:CreateText(row, displayName, 10, qColor.r, qColor.g, qColor.b)
         itemText:SetPoint("LEFT", 6, 0)
         itemText:SetWidth(280)
 

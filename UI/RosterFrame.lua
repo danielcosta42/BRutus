@@ -202,13 +202,23 @@ function BRutus.CreateRosterFrame()
     end
 
     function frame:UpdateTabVisibility()
+        local prevTab = nil
         for _, tab in ipairs(self.tabs) do
+            local visible = true
             if tab.officerOnly then
-                if BRutus:IsOfficer() then
-                    tab:Show()
+                visible = BRutus:IsOfficer()
+            end
+            if visible then
+                tab:ClearAllPoints()
+                if prevTab then
+                    tab:SetPoint("LEFT", prevTab, "RIGHT", 2, 0)
                 else
-                    tab:Hide()
+                    tab:SetPoint("LEFT", 4, 0)
                 end
+                tab:Show()
+                prevTab = tab
+            else
+                tab:Hide()
             end
         end
     end

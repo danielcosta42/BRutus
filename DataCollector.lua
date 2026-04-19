@@ -195,10 +195,10 @@ function DataCollector:CollectProfessions()
     for i = 1, numSkills do
         local skillName, isHeader_, _, skillRank, _, _, skillMaxRank = GetSkillLineInfo(i)
 
-        -- Check if it's a profession
+        -- Check if it's a profession (locale-independent)
         if not isHeader_ and self:IsProfession(skillName) then
             table.insert(profs, {
-                name = skillName,
+                name = self:GetCanonicalProfName(skillName),
                 rank = skillRank,
                 maxRank = skillMaxRank,
                 isPrimary = self:IsPrimaryProfession(skillName),
@@ -210,25 +210,71 @@ function DataCollector:CollectProfessions()
 end
 
 ----------------------------------------------------------------------
--- Profession helpers
+-- Profession helpers (locale-independent via hardcoded multi-locale map)
 ----------------------------------------------------------------------
-local PRIMARY_PROFESSIONS = {
-    ["Alchemy"] = true, ["Blacksmithing"] = true, ["Enchanting"] = true,
-    ["Engineering"] = true, ["Herbalism"] = true, ["Jewelcrafting"] = true,
-    ["Leatherworking"] = true, ["Mining"] = true, ["Skinning"] = true,
-    ["Tailoring"] = true,
-}
 
-local SECONDARY_PROFESSIONS = {
-    ["Cooking"] = true, ["First Aid"] = true, ["Fishing"] = true,
-}
+-- Maps ANY localized profession name -> { canonical, isPrimary }
+local PROF_LOOKUP = {}
+
+local function RegisterProf(canonical, isPrimary, names)
+    for _, name in ipairs(names) do
+        PROF_LOOKUP[name] = { canonical = canonical, isPrimary = isPrimary }
+    end
+end
+
+-- English, Portuguese (BR), Spanish, French, German, Russian, Korean, Chinese
+RegisterProf("Alchemy", true, {
+    "Alchemy", "Alquimia", "Alchimie", "Alchemie",
+})
+RegisterProf("Blacksmithing", true, {
+    "Blacksmithing", "Ferraria", "Herrería", "Forge", "Schmiedekunst",
+})
+RegisterProf("Enchanting", true, {
+    "Enchanting", "Encantamento", "Encantamiento", "Enchantement", "Verzauberkunst",
+})
+RegisterProf("Engineering", true, {
+    "Engineering", "Engenharia", "Ingeniería", "Ingénierie", "Ingenieurskunst",
+})
+RegisterProf("Herbalism", true, {
+    "Herbalism", "Herborismo", "Herboristería", "Herboristerie", "Kräuterkunde",
+})
+RegisterProf("Jewelcrafting", true, {
+    "Jewelcrafting", "Joalheria", "Joyería", "Joaillerie", "Juwelenschleifen",
+})
+RegisterProf("Leatherworking", true, {
+    "Leatherworking", "Couraria", "Peletería", "Travail du cuir", "Lederverarbeitung",
+})
+RegisterProf("Mining", true, {
+    "Mining", "Mineração", "Minería", "Minage", "Bergbau",
+})
+RegisterProf("Skinning", true, {
+    "Skinning", "Esfolamento", "Desuello", "Dépeçage", "Kürschnerei",
+})
+RegisterProf("Tailoring", true, {
+    "Tailoring", "Alfaiataria", "Sastrería", "Couture", "Schneiderei",
+})
+RegisterProf("Cooking", false, {
+    "Cooking", "Culinária", "Cocina", "Cuisine", "Kochkunst",
+})
+RegisterProf("First Aid", false, {
+    "First Aid", "Primeiros Socorros", "Primeros auxilios", "Secourisme", "Erste Hilfe",
+})
+RegisterProf("Fishing", false, {
+    "Fishing", "Pesca", "Pêche", "Angeln",
+})
 
 function DataCollector:IsProfession(name)
-    return PRIMARY_PROFESSIONS[name] or SECONDARY_PROFESSIONS[name] or false
+    return PROF_LOOKUP[name] ~= nil
 end
 
 function DataCollector:IsPrimaryProfession(name)
-    return PRIMARY_PROFESSIONS[name] or false
+    local info = PROF_LOOKUP[name]
+    return info and info.isPrimary or false
+end
+
+function DataCollector:GetCanonicalProfName(localizedName)
+    local info = PROF_LOOKUP[localizedName]
+    return info and info.canonical or localizedName
 end
 
 ----------------------------------------------------------------------

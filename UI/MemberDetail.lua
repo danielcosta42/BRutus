@@ -9,6 +9,36 @@ local DETAIL_WIDTH = 420
 local DETAIL_HEIGHT = 620
 
 ----------------------------------------------------------------------
+-- Create an invisible tooltip hover zone over a region
+-- anchor: FontString or Frame to overlay
+-- link: itemLink string OR itemId number
+-- w, h: optional size override (defaults to anchor size)
+----------------------------------------------------------------------
+local function CreateItemTooltipZone(parent, anchor, link, w, h)
+    if not link then return end
+    local zone = CreateFrame("Frame", nil, parent)
+    zone:SetAllPoints(anchor)
+    if w and h then
+        zone:SetSize(w, h)
+    end
+    zone:EnableMouse(true)
+    zone:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        if type(link) == "number" then
+            GameTooltip:SetHyperlink("item:" .. link)
+        else
+            GameTooltip:SetHyperlink(link)
+        end
+        GameTooltip:Show()
+    end)
+    zone:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
+    zone:Show()
+    return zone
+end
+
+----------------------------------------------------------------------
 -- Show member detail panel
 ----------------------------------------------------------------------
 function BRutus:ShowMemberDetail(memberData)
@@ -314,6 +344,7 @@ function PopulateDetail(frame, data)
                     qColor.r * 255, qColor.g * 255, qColor.b * 255,
                     item.order, BRutus.TMB:GetItemName(item.itemId), osStr))
                 itemStr:Show()
+                CreateItemTooltipZone(child, itemStr, item.itemId)
                 yOff = yOff - 15
             end
             yOff = yOff - 4
@@ -342,6 +373,7 @@ function PopulateDetail(frame, data)
                     qColor.r * 255, qColor.g * 255, qColor.b * 255,
                     item.order, BRutus.TMB:GetItemName(item.itemId), osStr))
                 itemStr:Show()
+                CreateItemTooltipZone(child, itemStr, item.itemId)
                 yOff = yOff - 15
             end
             yOff = yOff - 4
@@ -370,6 +402,7 @@ function PopulateDetail(frame, data)
                     qColor.r * 255, qColor.g * 255, qColor.b * 255,
                     BRutus.TMB:GetItemName(item.itemId), dateStr))
                 itemStr:Show()
+                CreateItemTooltipZone(child, itemStr, item.itemId)
                 yOff = yOff - 15
             end
         end
@@ -417,12 +450,23 @@ function PopulateDetail(frame, data)
             itemStr:SetWidth(contentWidth - 30)
             itemStr:SetJustifyH("LEFT")
             itemStr:SetWordWrap(false)
+            -- Resolve item name locally from itemLink
+            local displayName = entry.itemName or "?"
+            if entry.itemLink then
+                local localName = entry.itemLink:match("%[(.-)%]")
+                if localName and localName ~= "" then
+                    displayName = localName
+                end
+            end
             local dateStr = entry.timestamp and (" |cffAAAAAA" .. date("%m/%d", entry.timestamp) .. "|r") or ""
             local raidStr = entry.raid and entry.raid ~= "" and (" |cff888888(" .. entry.raid .. ")|r") or ""
             itemStr:SetText(string.format("|cff%02x%02x%02x%s|r%s%s",
                 qColor.r * 255, qColor.g * 255, qColor.b * 255,
-                entry.itemName or "?", raidStr, dateStr))
+                displayName, raidStr, dateStr))
             itemStr:Show()
+            if entry.itemLink then
+                CreateItemTooltipZone(child, itemStr, entry.itemLink)
+            end
             yOff = yOff - 15
         end
         if lootCount == 0 then
@@ -652,6 +696,15 @@ function CreateGearRow(parent, slotId, item, yOff, width)
     slotLabel:Show()
 
     if item and item.name and item.name ~= "" then
+        -- Resolve localized item name from ID when available
+        local displayName = item.name
+        if item.id then
+            local localName = GetItemInfo(item.id)
+            if localName and localName ~= "" then
+                displayName = localName
+            end
+        end
+
         -- Item icon
         if item.icon and item.icon ~= "" then
             local iconFrame = UI:CreateIcon(parent, 18, item.icon)
@@ -668,8 +721,11 @@ function CreateGearRow(parent, slotId, item, yOff, width)
         nameText:SetJustifyH("LEFT")
         nameText:SetWordWrap(false)
         nameText:SetTextColor(qColor.r, qColor.g, qColor.b)
-        nameText:SetText(item.name)
+        nameText:SetText(displayName)
         nameText:Show()
+
+        -- Tooltip hover zone over gear row
+        CreateItemTooltipZone(parent, nameText, item.link or item.id)
 
         -- Gem icons — inline after item name on the same row
         local gemAnchor = nameText
