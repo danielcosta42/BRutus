@@ -408,42 +408,68 @@ end
 -- Welcome message for new guild members
 ----------------------------------------------------------------------
 function Recruitment:RegisterWelcomeEvent()
-    -- Track players we personally invited
-    self.pendingInvites = {}
+    -- Track guild roster to detect new joins
+    self._knownMembers = {}
+    self._rosterReady = false
+    self._welcomedRecently = {}
+
+    -- Build initial roster snapshot
+    local function SnapshotRoster()
+        local members = {}
+        local numMembers = GetNumGuildMembers() or 0
+        for i = 1, numMembers do
+            local fullName = GetGuildRosterInfo(i)
+            if fullName then
+                local shortName = fullName:match("^([^-]+)") or fullName
+                members[shortName] = true
+            end
+        end
+        return members
+    end
+
+    -- Initialize roster snapshot after a delay (guild data needs to load)
+    C_Timer.After(8, function()
+        Recruitment._knownMembers = SnapshotRoster()
+        Recruitment._rosterReady = true
+    end)
 
     local frame = CreateFrame("Frame")
     frame:RegisterEvent("CHAT_MSG_SYSTEM")
     frame:SetScript("OnEvent", function(_, event, msg)
         if event ~= "CHAT_MSG_SYSTEM" then return end
         if not IsInGuild() then return end
+        if not BRutus.db.recruitment.welcomeEnabled then return end
+        if not Recruitment._rosterReady then return end
 
-        -- Track outgoing invites: "%s has been invited to the guild."
-        -- ERR_GUILD_INVITE_S = "%s has been invited to the guild."
-        local invitePattern = ERR_GUILD_INVITE_S and ERR_GUILD_INVITE_S:gsub("%%s", "(.+)") or "(.+) has been invited to the guild%."
-        local invitedName = msg:match(invitePattern)
-        if invitedName then
-            Recruitment.pendingInvites[invitedName] = time()
-            -- Clean up after 5 minutes (in case they never join)
-            C_Timer.After(300, function()
-                Recruitment.pendingInvites[invitedName] = nil
-            end)
-            return
+        -- Detect "%s has joined the guild."
+        local joinPattern = ERR_GUILD_JOIN_S and ERR_GUILD_JOIN_S:gsub("%%s", "(.+)") or nil
+        local newMember
+
+        if joinPattern then
+            newMember = msg:match(joinPattern)
         end
 
-        -- Detect "PlayerName has joined the guild." — only welcome if WE invited them
-        if not BRutus.db.recruitment.welcomeEnabled then return end
+        -- Fallback patterns for PT/EN clients
+        if not newMember then
+            newMember = msg:match("(.+) entrou na guilda%.")
+                     or msg:match("(.+) has joined the guild%.")
+        end
 
-        local joinPattern = ERR_GUILD_JOIN_S and ERR_GUILD_JOIN_S:gsub("%%s", "(.+)") or "(.+) has joined the guild%."
-        local newMember = msg:match(joinPattern)
         if not newMember then return end
-
-        -- Only send welcome if we were the one who invited this player
-        if not Recruitment.pendingInvites[newMember] then return end
-        Recruitment.pendingInvites[newMember] = nil
 
         -- Don't welcome ourselves
         local myName = UnitName("player")
         if newMember == myName then return end
+
+        -- Avoid duplicate welcomes (e.g. multiple officers running BRutus)
+        if Recruitment._welcomedRecently[newMember] then return end
+        Recruitment._welcomedRecently[newMember] = true
+        C_Timer.After(60, function()
+            Recruitment._welcomedRecently[newMember] = nil
+        end)
+
+        -- Add to known members
+        Recruitment._knownMembers[newMember] = true
 
         -- Send welcome in guild chat after a short delay
         C_Timer.After(3, function()
