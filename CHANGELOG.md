@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.14.0] - 2026-04-20
+
+### Added
+- exclude gathering professions from stale profession checks and recipe listings
+
+
 ## [1.13.0] - 2026-04-19
 
 ### Added
