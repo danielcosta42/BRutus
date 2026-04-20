@@ -558,40 +558,55 @@ function RecipeTracker:GetOnlineSet()
 end
 
 ----------------------------------------------------------------------
--- Build a cached itemId → crafters lookup from recipe data
+-- Build cached itemId → crafters and spellId → crafters lookups
 ----------------------------------------------------------------------
 function RecipeTracker:BuildItemCrafterIndex()
-    local index = {}
+    local itemIndex = {}
+    local spellIndex = {}
     local DC = BRutus.DataCollector
     for playerKey, professions in pairs(BRutus.db.recipes or {}) do
         local playerName = playerKey:match("^([^-]+)") or playerKey
         for profName, recipes in pairs(professions) do
             local canonical = DC and DC.GetCanonicalProfName and DC:GetCanonicalProfName(profName) or profName
+            local memberData = BRutus.db and BRutus.db.members and BRutus.db.members[playerKey]
+            local crafterInfo = {
+                playerKey = playerKey,
+                playerName = playerName,
+                class = memberData and memberData.class,
+                profName = canonical,
+            }
             for _, recipe in ipairs(recipes) do
                 if recipe.itemId then
-                    if not index[recipe.itemId] then
-                        index[recipe.itemId] = {}
+                    if not itemIndex[recipe.itemId] then
+                        itemIndex[recipe.itemId] = {}
                     end
                     local found = false
-                    for _, c in ipairs(index[recipe.itemId]) do
+                    for _, c in ipairs(itemIndex[recipe.itemId]) do
                         if c.playerKey == playerKey then found = true break end
                     end
                     if not found then
-                        local memberData = BRutus.db and BRutus.db.members and BRutus.db.members[playerKey]
-                        table.insert(index[recipe.itemId], {
-                            playerKey = playerKey,
-                            playerName = playerName,
-                            class = memberData and memberData.class,
-                            profName = canonical,
-                        })
+                        table.insert(itemIndex[recipe.itemId], crafterInfo)
+                    end
+                end
+                if recipe.spellId then
+                    if not spellIndex[recipe.spellId] then
+                        spellIndex[recipe.spellId] = {}
+                    end
+                    local found = false
+                    for _, c in ipairs(spellIndex[recipe.spellId]) do
+                        if c.playerKey == playerKey then found = true break end
+                    end
+                    if not found then
+                        table.insert(spellIndex[recipe.spellId], crafterInfo)
                     end
                 end
             end
         end
     end
-    self._itemCrafterIndex = index
+    self._itemCrafterIndex = itemIndex
+    self._spellCrafterIndex = spellIndex
     self._itemCrafterIndexTime = GetTime()
-    return index
+    return itemIndex
 end
 
 function RecipeTracker:GetCraftersForItem(itemId)
@@ -606,6 +621,18 @@ function RecipeTracker:GetCraftersForItem(itemId)
     return crafters
 end
 
+function RecipeTracker:GetCraftersForSpell(spellId)
+    if not spellId then return nil end
+    -- Rebuild cache every 30 seconds
+    if not self._spellCrafterIndex or not self._itemCrafterIndexTime
+       or (GetTime() - self._itemCrafterIndexTime) > 30 then
+        self:BuildItemCrafterIndex()
+    end
+    local crafters = self._spellCrafterIndex[spellId]
+    if not crafters or #crafters == 0 then return nil end
+    return crafters
+end
+
 ----------------------------------------------------------------------
 -- Hook GameTooltip to show crafters for items
 ----------------------------------------------------------------------
@@ -613,16 +640,8 @@ function RecipeTracker:HookTooltips()
     local C = BRutus.Colors
     local onlineSet
 
-    local function OnTooltipSetItem(tooltip)
-        if not BRutus.db or not BRutus.db.recipes then return end
-
-        local _, link = tooltip:GetItem()
-        if not link then return end
-
-        local itemId = tonumber(link:match("item:(%d+)"))
-        if not itemId then return end
-
-        local crafters = RecipeTracker:GetCraftersForItem(itemId)
+    -- Shared: append crafter lines to a tooltip
+    local function AppendCrafters(tooltip, crafters, label)
         if not crafters then return end
 
         -- Refresh online set (cached per tooltip show)
@@ -643,7 +662,7 @@ function RecipeTracker:HookTooltips()
         end)
 
         tooltip:AddLine(" ")
-        tooltip:AddLine("Fabricado por:", C.accent.r, C.accent.g, C.accent.b)
+        tooltip:AddLine(label or "Fabricado por:", C.accent.r, C.accent.g, C.accent.b)
         for _, c in ipairs(sorted) do
             local cc = c.class and BRutus.ClassColors[c.class] or C.white
             local status = onlineSet[c.playerName] and " |cff00ff00(online)|r" or " |cff666666(offline)|r"
@@ -653,13 +672,38 @@ function RecipeTracker:HookTooltips()
         tooltip:Show()
     end
 
+    -- Item tooltip handler
+    local function OnTooltipSetItem(tooltip)
+        if not BRutus.db or not BRutus.db.recipes then return end
+
+        local _, link = tooltip:GetItem()
+        if not link then return end
+
+        local itemId = tonumber(link:match("item:(%d+)"))
+        if not itemId then return end
+
+        local crafters = RecipeTracker:GetCraftersForItem(itemId)
+        AppendCrafters(tooltip, crafters, "Fabricado por:")
+    end
+
+    -- Spell tooltip handler (tradeskill window, spellbook, action bars)
+    local function OnTooltipSetSpell(tooltip)
+        if not BRutus.db or not BRutus.db.recipes then return end
+
+        local _, spellId = tooltip:GetSpell()
+        if not spellId then return end
+
+        local crafters = RecipeTracker:GetCraftersForSpell(spellId)
+        AppendCrafters(tooltip, crafters, "Encantado por:")
+    end
+
     -- Clear online cache when tooltip hides
     GameTooltip:HookScript("OnTooltipCleared", function()
         onlineSet = nil
     end)
 
+    -- Item hooks
     GameTooltip:HookScript("OnTooltipSetItem", OnTooltipSetItem)
-
     if ItemRefTooltip then
         ItemRefTooltip:HookScript("OnTooltipSetItem", OnTooltipSetItem)
     end
@@ -668,5 +712,27 @@ function RecipeTracker:HookTooltips()
     end
     if ShoppingTooltip2 then
         ShoppingTooltip2:HookScript("OnTooltipSetItem", OnTooltipSetItem)
+    end
+
+    -- Spell hooks (tradeskill window hover, spellbook, action bars)
+    GameTooltip:HookScript("OnTooltipSetSpell", OnTooltipSetSpell)
+
+    -- Enchant link hooks (clicking enchant:XXXXX in chat)
+    local function HookSetHyperlink(tooltip)
+        local orig = tooltip.SetHyperlink
+        if not orig then return end
+        tooltip.SetHyperlink = function(self, link, ...)
+            orig(self, link, ...)
+            if not link then return end
+            local enchantId = tonumber(link:match("^enchant:(%d+)"))
+            if not enchantId then return end
+            local crafters = RecipeTracker:GetCraftersForSpell(enchantId)
+            AppendCrafters(self, crafters, "Encantado por:")
+        end
+    end
+
+    HookSetHyperlink(GameTooltip)
+    if ItemRefTooltip then
+        HookSetHyperlink(ItemRefTooltip)
     end
 end
