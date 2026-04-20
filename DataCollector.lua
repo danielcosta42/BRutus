@@ -333,23 +333,23 @@ function DataCollector:StoreReceivedData(playerKey, data)
 
     -- Store recipes if included in broadcast
     if data.recipes then
-        if not BRutusDB.recipes then BRutusDB.recipes = {} end
-        if not BRutusDB.recipes[playerKey] then BRutusDB.recipes[playerKey] = {} end
+        if not BRutus.db.recipes then BRutus.db.recipes = {} end
+        if not BRutus.db.recipes[playerKey] then BRutus.db.recipes[playerKey] = {} end
         local DC = BRutus.DataCollector
         for profName, recipes in pairs(data.recipes) do
             local canonical = DC and DC.GetCanonicalProfName and DC:GetCanonicalProfName(profName) or profName
             -- Remove old localized keys that map to the same canonical profession
-            for oldKey, _ in pairs(BRutusDB.recipes[playerKey]) do
+            for oldKey, _ in pairs(BRutus.db.recipes[playerKey]) do
                 if oldKey ~= canonical and DC and DC.GetCanonicalProfName and DC:GetCanonicalProfName(oldKey) == canonical then
-                    BRutusDB.recipes[playerKey][oldKey] = nil
+                    BRutus.db.recipes[playerKey][oldKey] = nil
                 end
             end
             -- Preserve spellIds: merge from existing data into incoming
             -- (same player = same locale, names match)
             if BRutus.RecipeTracker then
-                BRutus.RecipeTracker:MergeSpellIds(BRutusDB.recipes[playerKey][canonical], recipes)
+                BRutus.RecipeTracker:MergeSpellIds(BRutus.db.recipes[playerKey][canonical], recipes)
             end
-            BRutusDB.recipes[playerKey][canonical] = recipes
+            BRutus.db.recipes[playerKey][canonical] = recipes
         end
     end
 
@@ -416,8 +416,8 @@ function DataCollector:GetBroadcastData()
 
     -- Include recipes (keyed by profession)
     local myKey = BRutus:GetPlayerKey(myData.name, myData.realm or GetRealmName())
-    if BRutusDB.recipes and BRutusDB.recipes[myKey] then
-        clean.recipes = BRutusDB.recipes[myKey]
+    if BRutus.db.recipes and BRutus.db.recipes[myKey] then
+        clean.recipes = BRutus.db.recipes[myKey]
     end
 
     return clean

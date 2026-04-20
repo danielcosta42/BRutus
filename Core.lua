@@ -180,20 +180,10 @@ end)
 -- Initialization
 ----------------------------------------------------------------------
 function BRutus:Initialize()
-    -- Initialize saved variables
+    -- Ensure global container exists
     if not BRutusDB then
         BRutusDB = {}
     end
-    for k, v in pairs(DB_DEFAULTS) do
-        if BRutusDB[k] == nil then
-            if type(v) == "table" then
-                BRutusDB[k] = self:DeepCopy(v)
-            else
-                BRutusDB[k] = v
-            end
-        end
-    end
-    self.db = BRutusDB
 
     -- Register addon prefix for communication
     if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then
@@ -203,10 +193,91 @@ function BRutus:Initialize()
     self:Print("v" .. self.VERSION .. " loaded. Type |cffFFD700/brutus|r to open.")
 end
 
+----------------------------------------------------------------------
+-- Per-guild DB resolution
+----------------------------------------------------------------------
+function BRutus:ResolveGuildDB()
+    if not IsInGuild() then
+        self.db = nil
+        self.guildKey = nil
+        return false
+    end
+
+    local guildName = GetGuildInfo("player")
+    if not guildName then return false end
+
+    local realmName = GetRealmName() or "Unknown"
+    local guildKey = guildName .. "-" .. realmName
+
+    -- Already resolved to this guild
+    if self.guildKey == guildKey and self.db then return true end
+
+    -- Migration from flat structure (pre-guild-keyed DB)
+    if not BRutusDB._dbVersion then
+        if BRutusDB.version or BRutusDB.members or BRutusDB.settings then
+            local oldData = {}
+            for k, v in pairs(BRutusDB) do
+                oldData[k] = v
+            end
+            wipe(BRutusDB)
+            BRutusDB[guildKey] = oldData
+        end
+        BRutusDB._dbVersion = 2
+    end
+
+    if not BRutusDB[guildKey] then
+        BRutusDB[guildKey] = {}
+    end
+
+    -- Apply defaults
+    local guildDB = BRutusDB[guildKey]
+    for k, v in pairs(DB_DEFAULTS) do
+        if guildDB[k] == nil then
+            if type(v) == "table" then
+                guildDB[k] = self:DeepCopy(v)
+            else
+                guildDB[k] = v
+            end
+        end
+    end
+
+    self.db = guildDB
+    self.guildKey = guildKey
+    return true
+end
+
 function BRutus:OnLogin()
+    if not IsInGuild() then
+        self:Print("|cff888888Not in a guild \u2014 addon inactive.|r")
+        return
+    end
+
+    -- Guild info may not be available immediately; retry a few times
+    if not self:ResolveGuildDB() then
+        local attempts = 0
+        local function tryResolve()
+            attempts = attempts + 1
+            if BRutus:ResolveGuildDB() then
+                BRutus:InitModules()
+                return
+            end
+            if attempts < 5 then
+                C_Timer.After(2, tryResolve)
+            else
+                BRutus:Print("|cffFF4444Could not load guild info. Try /reload.|r")
+            end
+        end
+        C_Timer.After(2, tryResolve)
+        return
+    end
+
+    self:InitModules()
+end
+
+function BRutus:InitModules()
     -- Module enabled helper
     local function modEnabled(key)
-        if not self.db.settings or not self.db.settings.modules then return true end
+        if not self.db or not self.db.settings or not self.db.settings.modules then return true end
         return self.db.settings.modules[key] ~= false
     end
 
@@ -269,6 +340,7 @@ function BRutus:OnLogin()
 end
 
 function BRutus:OnEnterWorld()
+    if not self.db or not self.guildKey then return end
     -- Collect own data after a short delay
     C_Timer.After(3, function()
         if BRutus.DataCollector then
@@ -314,7 +386,9 @@ SlashCmdList["BRUTUS"] = function(msg)
             BRutus:Print("Broadcasting data to guild...")
         end
     elseif msg == "reset" then
-        BRutusDB = nil
+        if self.guildKey and BRutusDB then
+            BRutusDB[self.guildKey] = nil
+        end
         ReloadUI()
     elseif msg:match("^recruit") then
         local rest = msg:gsub("^recruit%s*", "")
@@ -417,6 +491,10 @@ end
 -- Toggle main roster window
 ----------------------------------------------------------------------
 function BRutus:ToggleRoster()
+    if not IsInGuild() or not self.db then
+        self:Print("|cff888888Not in a guild \226\128\148 addon inactive.|r")
+        return
+    end
     if not self.RosterFrame then
         self.RosterFrame = BRutus.CreateRosterFrame()
     end
@@ -544,7 +622,7 @@ function BRutus:GetStaleProfessions()
     local myData = self.db and self.db.myData
     if not myData or not myData.professions then return {} end
 
-    local scanTimes = BRutusDB.recipeScanTimes or {}
+    local scanTimes = (self.db and self.db.recipeScanTimes) or {}
     local stale = {}
     local now = time()
 
@@ -675,7 +753,7 @@ end
 function BRutus:CheckAndDismissProfessionReminder()
     if not self.profReminderFrame or not self.profReminderStale then return end
 
-    local scanTimes = BRutusDB.recipeScanTimes or {}
+    local scanTimes = (self.db and self.db.recipeScanTimes) or {}
     local now = time()
 
     for profName, _ in pairs(self.profReminderStale) do

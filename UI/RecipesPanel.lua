@@ -487,7 +487,7 @@ function BRutus:CreateRecipesPanel(parent, _mainFrame)
         -- Update info bar
         local totalPlayers = 0
         local totalRecipes = 0
-        for _, professions in pairs(BRutusDB.recipes or {}) do
+        for _, professions in pairs((BRutus.db and BRutus.db.recipes) or {}) do
             totalPlayers = totalPlayers + 1
             for _, recipes in pairs(professions) do
                 totalRecipes = totalRecipes + #recipes

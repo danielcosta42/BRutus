@@ -27,8 +27,8 @@ function RecipeTracker:Initialize()
     end)
 
     -- Ensure DB table exists
-    if not BRutusDB.recipes then
-        BRutusDB.recipes = {}
+    if not BRutus.db.recipes then
+        BRutus.db.recipes = {}
     end
 
     -- Enrich stored recipes: propagate spellIds from players who have them
@@ -50,7 +50,7 @@ function RecipeTracker:EnrichStoredRecipes()
     -- Phase 1: Build name→spellId per profession from ALL recipes that have spellId
     local profLookup = {} -- profName → { lowerName → spellId }
 
-    for _, professions in pairs(BRutusDB.recipes or {}) do
+    for _, professions in pairs(BRutus.db.recipes or {}) do
         for profName, recipes in pairs(professions) do
             if not profLookup[profName] then profLookup[profName] = {} end
             for _, r in ipairs(recipes) do
@@ -70,7 +70,7 @@ function RecipeTracker:EnrichStoredRecipes()
     -- Phase 2: Enrich where possible, then purge remaining ID-less entries
     local enriched = 0
     local purged = 0
-    for _, professions in pairs(BRutusDB.recipes or {}) do
+    for _, professions in pairs(BRutus.db.recipes or {}) do
         for profName, recipes in pairs(professions) do
             local lookup = profLookup[profName]
             -- Reverse iterate so we can remove in-place
@@ -244,27 +244,27 @@ function RecipeTracker:StoreMyRecipes(profName, recipes)
     local realm = GetRealmName()
     local key = BRutus:GetPlayerKey(name, realm)
 
-    if not BRutusDB.recipes[key] then
-        BRutusDB.recipes[key] = {}
+    if not BRutus.db.recipes[key] then
+        BRutus.db.recipes[key] = {}
     end
 
     -- Remove old localized keys that map to the same canonical profession
     local DC = BRutus.DataCollector
     if DC and DC.GetCanonicalProfName then
-        for oldKey, _ in pairs(BRutusDB.recipes[key]) do
+        for oldKey, _ in pairs(BRutus.db.recipes[key]) do
             if oldKey ~= profName and DC:GetCanonicalProfName(oldKey) == profName then
-                BRutusDB.recipes[key][oldKey] = nil
+                BRutus.db.recipes[key][oldKey] = nil
             end
         end
     end
 
-    BRutusDB.recipes[key][profName] = recipes
+    BRutus.db.recipes[key][profName] = recipes
 
     -- Track scan timestamps per profession
-    if not BRutusDB.recipeScanTimes then
-        BRutusDB.recipeScanTimes = {}
+    if not BRutus.db.recipeScanTimes then
+        BRutus.db.recipeScanTimes = {}
     end
-    BRutusDB.recipeScanTimes[profName] = time()
+    BRutus.db.recipeScanTimes[profName] = time()
 
     BRutus:Print(string.format("|cff00ff00Recipes scanned:|r %d %s recipes indexed.", #recipes, profName))
 
@@ -316,21 +316,21 @@ function RecipeTracker:HandleIncoming(sender, data)
     local realm = sender:match("-(.+)$") or GetRealmName()
     local key = BRutus:GetPlayerKey(senderName, realm)
 
-    if not BRutusDB.recipes[key] then
-        BRutusDB.recipes[key] = {}
+    if not BRutus.db.recipes[key] then
+        BRutus.db.recipes[key] = {}
     end
 
     -- Remove old localized keys that map to the same canonical profession
-    for oldKey, _ in pairs(BRutusDB.recipes[key]) do
+    for oldKey, _ in pairs(BRutus.db.recipes[key]) do
         if oldKey ~= profName and DC and DC:GetCanonicalProfName(oldKey) == profName then
-            BRutusDB.recipes[key][oldKey] = nil
+            BRutus.db.recipes[key][oldKey] = nil
         end
     end
 
     -- Preserve spellIds: merge from existing data into incoming
-    self:MergeSpellIds(BRutusDB.recipes[key][profName], recipes)
+    self:MergeSpellIds(BRutus.db.recipes[key][profName], recipes)
 
-    BRutusDB.recipes[key][profName] = recipes
+    BRutus.db.recipes[key][profName] = recipes
 end
 
 ----------------------------------------------------------------------
@@ -340,7 +340,7 @@ function RecipeTracker:GetAllProfessions()
     local profs = {}
     local seen = {}
     local DC = BRutus.DataCollector
-    for _, playerRecipes in pairs(BRutusDB.recipes or {}) do
+    for _, playerRecipes in pairs(BRutus.db.recipes or {}) do
         for profName, _ in pairs(playerRecipes) do
             local canonical = DC and DC.GetCanonicalProfName and DC:GetCanonicalProfName(profName) or profName
             local isGathering = DC and DC.IsGatheringProfession and DC:IsGatheringProfession(canonical)
@@ -380,7 +380,7 @@ function RecipeTracker:BuildRecipeIndex()
 
     -- First pass: group all recipes; build name→key lookup from ID-based entries
     local nameOnlyQueue = {}
-    for playerKey, professions in pairs(BRutusDB.recipes or {}) do
+    for playerKey, professions in pairs(BRutus.db.recipes or {}) do
         local playerName = playerKey:match("^([^-]+)") or playerKey
         for profName, recipes in pairs(professions) do
             local canonical = DC and DC.GetCanonicalProfName and DC:GetCanonicalProfName(profName) or profName
@@ -563,7 +563,7 @@ end
 function RecipeTracker:BuildItemCrafterIndex()
     local index = {}
     local DC = BRutus.DataCollector
-    for playerKey, professions in pairs(BRutusDB.recipes or {}) do
+    for playerKey, professions in pairs(BRutus.db.recipes or {}) do
         local playerName = playerKey:match("^([^-]+)") or playerKey
         for profName, recipes in pairs(professions) do
             local canonical = DC and DC.GetCanonicalProfName and DC:GetCanonicalProfName(profName) or profName
@@ -614,7 +614,7 @@ function RecipeTracker:HookTooltips()
     local onlineSet
 
     local function OnTooltipSetItem(tooltip)
-        if not BRutusDB.recipes then return end
+        if not BRutus.db or not BRutus.db.recipes then return end
 
         local _, link = tooltip:GetItem()
         if not link then return end
