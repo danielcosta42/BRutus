@@ -343,7 +343,8 @@ function RecipeTracker:GetAllProfessions()
     for _, playerRecipes in pairs(BRutusDB.recipes or {}) do
         for profName, _ in pairs(playerRecipes) do
             local canonical = DC and DC.GetCanonicalProfName and DC:GetCanonicalProfName(profName) or profName
-            if not seen[canonical] then
+            local isGathering = DC and DC.IsGatheringProfession and DC:IsGatheringProfession(canonical)
+            if not seen[canonical] and not isGathering then
                 seen[canonical] = true
                 table.insert(profs, canonical)
             end

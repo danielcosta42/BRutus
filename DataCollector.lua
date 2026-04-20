@@ -224,9 +224,9 @@ end
 -- Maps ANY localized profession name -> { canonical, isPrimary }
 local PROF_LOOKUP = {}
 
-local function RegisterProf(canonical, isPrimary, names)
+local function RegisterProf(canonical, isPrimary, names, isGathering)
     for _, name in ipairs(names) do
-        PROF_LOOKUP[name] = { canonical = canonical, isPrimary = isPrimary }
+        PROF_LOOKUP[name] = { canonical = canonical, isPrimary = isPrimary, isGathering = isGathering or false }
     end
 end
 
@@ -245,7 +245,7 @@ RegisterProf("Engineering", true, {
 })
 RegisterProf("Herbalism", true, {
     "Herbalism", "Herborismo", "Herboristería", "Herboristerie", "Kräuterkunde",
-})
+}, true)
 RegisterProf("Jewelcrafting", true, {
     "Jewelcrafting", "Joalheria", "Joyería", "Joaillerie", "Juwelenschleifen",
 })
@@ -257,7 +257,7 @@ RegisterProf("Mining", true, {
 })
 RegisterProf("Skinning", true, {
     "Skinning", "Esfolamento", "Desuello", "Dépeçage", "Kürschnerei",
-})
+}, true)
 RegisterProf("Tailoring", true, {
     "Tailoring", "Alfaiataria", "Sastrería", "Couture", "Schneiderei",
 })
@@ -269,7 +269,7 @@ RegisterProf("First Aid", false, {
 })
 RegisterProf("Fishing", false, {
     "Fishing", "Pesca", "Pêche", "Angeln",
-})
+}, true)
 
 function DataCollector:IsProfession(name)
     return PROF_LOOKUP[name] ~= nil
@@ -283,6 +283,11 @@ end
 function DataCollector:GetCanonicalProfName(localizedName)
     local info = PROF_LOOKUP[localizedName]
     return info and info.canonical or localizedName
+end
+
+function DataCollector:IsGatheringProfession(name)
+    local info = PROF_LOOKUP[name]
+    return info and info.isGathering or false
 end
 
 ----------------------------------------------------------------------

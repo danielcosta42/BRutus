@@ -548,8 +548,10 @@ function BRutus:GetStaleProfessions()
     local stale = {}
     local now = time()
 
+    local DC = self.DataCollector
     for _, prof in ipairs(myData.professions) do
-        if prof.isPrimary and prof.name then
+        local isGathering = DC and DC.IsGatheringProfession and DC:IsGatheringProfession(prof.name)
+        if prof.isPrimary and prof.name and not isGathering then
             local lastScan = scanTimes[prof.name]
             if not lastScan or (now - lastScan) > STALE_THRESHOLD then
                 table.insert(stale, prof.name)
