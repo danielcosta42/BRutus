@@ -344,7 +344,8 @@ function RecipeTracker:GetAllProfessions()
         for profName, _ in pairs(playerRecipes) do
             local canonical = DC and DC.GetCanonicalProfName and DC:GetCanonicalProfName(profName) or profName
             local isGathering = DC and DC.IsGatheringProfession and DC:IsGatheringProfession(canonical)
-            if not seen[canonical] and not isGathering then
+            local isKnown = not DC or not DC.IsKnownProfession or DC:IsKnownProfession(canonical)
+            if not seen[canonical] and not isGathering and isKnown then
                 seen[canonical] = true
                 table.insert(profs, canonical)
             end
@@ -384,6 +385,10 @@ function RecipeTracker:BuildRecipeIndex()
         local playerName = playerKey:match("^([^-]+)") or playerKey
         for profName, recipes in pairs(professions) do
             local canonical = DC and DC.GetCanonicalProfName and DC:GetCanonicalProfName(profName) or profName
+            -- Skip gathering profs and unknown profs (e.g. Poisons, old stale data)
+            local isGathering = DC and DC.IsGatheringProfession and DC:IsGatheringProfession(canonical)
+            local isKnown = not DC or not DC.IsKnownProfession or DC:IsKnownProfession(canonical)
+            if not isGathering and isKnown then
             for _, recipe in ipairs(recipes) do
                 local recipeKey
                 if recipe.spellId then
@@ -442,6 +447,7 @@ function RecipeTracker:BuildRecipeIndex()
                     })
                 end
             end
+            end -- if not isGathering and isKnown
         end
     end
 
@@ -714,25 +720,10 @@ function RecipeTracker:HookTooltips()
         ShoppingTooltip2:HookScript("OnTooltipSetItem", OnTooltipSetItem)
     end
 
-    -- Spell hooks (tradeskill window hover, spellbook, action bars)
+    -- Spell/enchant hooks: OnTooltipSetSpell fires for both tradeskill hover AND
+    -- enchant: hyperlinks, so no need for a separate SetHyperlink hook.
     GameTooltip:HookScript("OnTooltipSetSpell", OnTooltipSetSpell)
-
-    -- Enchant link hooks (clicking enchant:XXXXX in chat)
-    local function HookSetHyperlink(tooltip)
-        local orig = tooltip.SetHyperlink
-        if not orig then return end
-        tooltip.SetHyperlink = function(self, link, ...)
-            orig(self, link, ...)
-            if not link then return end
-            local enchantId = tonumber(link:match("^enchant:(%d+)"))
-            if not enchantId then return end
-            local crafters = RecipeTracker:GetCraftersForSpell(enchantId)
-            AppendCrafters(self, crafters, "Encantado por:")
-        end
-    end
-
-    HookSetHyperlink(GameTooltip)
     if ItemRefTooltip then
-        HookSetHyperlink(ItemRefTooltip)
+        ItemRefTooltip:HookScript("OnTooltipSetSpell", OnTooltipSetSpell)
     end
 end

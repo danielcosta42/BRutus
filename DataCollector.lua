@@ -270,6 +270,9 @@ RegisterProf("First Aid", false, {
 RegisterProf("Fishing", false, {
     "Fishing", "Pesca", "Pêche", "Angeln",
 }, true)
+RegisterProf("Poisons", false, {
+    "Poisons", "Venenos", "Venins", "Gifte",
+}, true)
 
 function DataCollector:IsProfession(name)
     return PROF_LOOKUP[name] ~= nil
@@ -283,6 +286,10 @@ end
 function DataCollector:GetCanonicalProfName(localizedName)
     local info = PROF_LOOKUP[localizedName]
     return info and info.canonical or localizedName
+end
+
+function DataCollector:IsKnownProfession(name)
+    return PROF_LOOKUP[name] ~= nil
 end
 
 function DataCollector:IsGatheringProfession(name)

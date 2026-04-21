@@ -112,6 +112,7 @@ local DB_DEFAULTS = {
         sortAsc = false,
         showOffline = true,
         minimap = { hide = false },
+        officerMaxRank = 2,  -- rank indexes 0..officerMaxRank are considered officers
         modules = {
             raidTracker = true,
             lootTracker = true,
@@ -530,8 +531,8 @@ function BRutus:IsOfficer()
     if not IsInGuild() then return false end
     local _, _, rankIndex = GetGuildInfo("player")
     if not rankIndex then return false end
-    -- Ranks 0-2: GM Estrategista, Doutrinador, Oficial
-    return rankIndex <= 2
+    local maxRank = (self.db and self.db.settings and self.db.settings.officerMaxRank) or 2
+    return rankIndex <= maxRank
 end
 
 function BRutus:DeepCopy(orig)
