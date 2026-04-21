@@ -241,18 +241,82 @@ function AttunementTracker:IsQuestComplete(questId)
 end
 
 ----------------------------------------------------------------------
+-- Get effective attunements: merges own data with linked chars,
+-- propagating "complete" from any char on the same account group
+----------------------------------------------------------------------
+function AttunementTracker:GetEffectiveAttunements(playerKey)
+    local data = BRutus.db.members[playerKey]
+    local baseAtts = (data and data.attunements) or {}
+
+    -- Index own attunements by short name
+    local effective = {}
+    for _, att in ipairs(baseAtts) do
+        effective[att.short] = {
+            name       = att.name,
+            short      = att.short,
+            tier       = att.tier,
+            icon       = att.icon,
+            complete   = att.complete,
+            progress   = att.progress or 0,
+            questsDone = att.questsDone or 0,
+            questsTotal = att.questsTotal or 0,
+            questStatus = att.questStatus,
+            accountWide = false,
+            sourceChar  = nil,
+        }
+    end
+
+    -- Propagate "complete" from any linked char that is further ahead
+    local linked = BRutus:GetLinkedChars(playerKey)
+    for _, linkedKey in ipairs(linked) do
+        if linkedKey ~= playerKey then
+            local linkedData = BRutus.db.members[linkedKey]
+            if linkedData and linkedData.attunements then
+                for _, att in ipairs(linkedData.attunements) do
+                    local ex = effective[att.short]
+                    if ex and att.complete and not ex.complete then
+                        effective[att.short] = {
+                            name        = att.name,
+                            short       = att.short,
+                            tier        = att.tier,
+                            icon        = att.icon,
+                            complete    = true,
+                            progress    = 1.0,
+                            questsDone  = att.questsDone or 0,
+                            questsTotal = att.questsTotal or 0,
+                            accountWide = true,
+                            sourceChar  = linkedKey,
+                        }
+                    end
+                end
+            end
+        end
+    end
+
+    -- Return in canonical ATTUNEMENTS order
+    local result = {}
+    for _, attDef in ipairs(self.ATTUNEMENTS) do
+        local e = effective[attDef.short]
+        if e then
+            table.insert(result, e)
+        end
+    end
+    return result
+end
+
+----------------------------------------------------------------------
 -- Get compact summary for the roster column (e.g. "3/8")
 ----------------------------------------------------------------------
 function AttunementTracker:GetAttunementSummary(playerKey)
-    local data = BRutus.db.members[playerKey]
-    if not data or not data.attunements then
+    local atts = self:GetEffectiveAttunements(playerKey)
+    if not atts or #atts == 0 then
         return "No data"
     end
 
-    local total = #data.attunements
+    local total = #atts
     local done = 0
     local inProgress = 0
-    for _, att in ipairs(data.attunements) do
+    for _, att in ipairs(atts) do
         if att.complete then
             done = done + 1
         elseif att.progress > 0 then

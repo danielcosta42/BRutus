@@ -285,14 +285,22 @@ function PopulateDetail(frame, data)
     end
 
     ----------------------------------------------------------------
-    -- Section: Attunements
+    -- Section: Attunements (account-wide propagation from linked chars)
     ----------------------------------------------------------------
     yOff = yOff - 10
+    local playerKey = BRutus:GetPlayerKey(data.name, data.realm or GetRealmName())
     yOff = CreateSectionHeader(child, "RAID ATTUNEMENTS", yOff, contentWidth)
     yOff = yOff - 5
 
-    if data.attunements and #data.attunements > 0 then
-        for _, att in ipairs(data.attunements) do
+    local attsToShow
+    if BRutus.AttunementTracker then
+        attsToShow = BRutus.AttunementTracker:GetEffectiveAttunements(playerKey)
+    else
+        attsToShow = data.attunements
+    end
+
+    if attsToShow and #attsToShow > 0 then
+        for _, att in ipairs(attsToShow) do
             yOff = CreateAttunementRow(child, att, yOff, contentWidth)
         end
     else
@@ -637,6 +645,104 @@ function PopulateDetail(frame, data)
         end
     end
 
+    ----------------------------------------------------------------
+    -- Section: Linked Characters (officer only — alt/main management)
+    ----------------------------------------------------------------
+    if BRutus:IsOfficer() then
+        yOff = yOff - 10
+        local linkedKeys = BRutus:GetLinkedChars(playerKey)
+        local altLinks = (BRutus.db and BRutus.db.altLinks) or {}
+        local myMainKey = altLinks[playerKey]  -- nil if playerKey is a main
+
+        -- Header shows how many chars are linked
+        local linkCount = #linkedKeys - 1  -- exclude self
+        local hdrSuffix = linkCount > 0 and ("  --  " .. linkCount .. " vinculado(s)") or "  --  nenhum"
+        yOff = CreateSectionHeader(child, "PERSONAGENS VINCULADOS" .. hdrSuffix, yOff, contentWidth)
+        yOff = yOff - 5
+
+        local noteLabel = child:CreateFontString(nil, "OVERLAY")
+        noteLabel:SetFont("Fonts\\FRIZQT__.TTF", 9, "")
+        noteLabel:SetPoint("TOPLEFT", 12, yOff)
+        noteLabel:SetWidth(contentWidth - 20)
+        noteLabel:SetTextColor(C.silver.r, C.silver.g, C.silver.b, 0.7)
+        noteLabel:SetText("Chars vinculados compartilham attunements account-wide.")
+        noteLabel:Show()
+        yOff = yOff - 16
+
+        -- List currently linked chars (excluding self)
+        for _, lk in ipairs(linkedKeys) do
+            if lk ~= playerKey then
+                local lkName = lk:match("^([^-]+)") or lk
+                local lkIsMain = (altLinks[lk] == nil)
+                local lkLabel = child:CreateFontString(nil, "OVERLAY")
+                lkLabel:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
+                lkLabel:SetPoint("TOPLEFT", 12, yOff)
+                lkLabel:SetTextColor(C.gold.r, C.gold.g, C.gold.b)
+                lkLabel:SetText((lkIsMain and "[main] " or "[alt]  ") .. lkName)
+                lkLabel:Show()
+
+                -- Unlink button
+                local unlinkBtn = UI:CreateButton(child, "Desvincular", 80, 18)
+                unlinkBtn:SetPoint("LEFT", lkLabel, "RIGHT", 10, 0)
+                local capturedKey = lk
+                unlinkBtn:SetScript("OnClick", function()
+                    -- If lk is the main, unlink playerKey from it; else unlink lk
+                    if lkIsMain then
+                        BRutus:UnlinkAlt(playerKey)
+                    else
+                        BRutus:UnlinkAlt(capturedKey)
+                    end
+                    PopulateDetail(frame, data)
+                end)
+                yOff = yOff - 22
+            end
+        end
+
+        -- Input to add a new link
+        local addLinkBox = CreateFrame("EditBox", nil, child, "BackdropTemplate")
+        addLinkBox:SetSize(contentWidth - 110, 22)
+        addLinkBox:SetPoint("TOPLEFT", 12, yOff - 6)
+        addLinkBox:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
+        addLinkBox:SetBackdropColor(0.05, 0.05, 0.08, 1)
+        addLinkBox:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.4)
+        addLinkBox:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
+        addLinkBox:SetTextColor(C.white.r, C.white.g, C.white.b)
+        addLinkBox:SetTextInsets(6, 6, 2, 2)
+        addLinkBox:SetAutoFocus(false)
+        addLinkBox:SetMaxLetters(60)
+        addLinkBox:Show()
+
+        local addLinkPlaceholder = addLinkBox:CreateFontString(nil, "OVERLAY")
+        addLinkPlaceholder:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
+        addLinkPlaceholder:SetPoint("LEFT", 6, 0)
+        addLinkPlaceholder:SetTextColor(0.35, 0.35, 0.35)
+        addLinkPlaceholder:SetText("NomeDoAlt (este é o main)")
+        addLinkBox:SetScript("OnTextChanged", function(self)
+            if self:GetText() ~= "" then addLinkPlaceholder:Hide() else addLinkPlaceholder:Show() end
+        end)
+        addLinkBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+
+        local addLinkBtn = UI:CreateButton(child, "Vincular alt", 90, 22)
+        addLinkBtn:SetPoint("LEFT", addLinkBox, "RIGHT", 6, 0)
+
+        local doLink = function()
+            local altName = strtrim(addLinkBox:GetText())
+            if altName == "" then return end
+            local realm = data.realm or GetRealmName()
+            local altKey = BRutus:GetPlayerKey(altName, realm)
+            -- playerKey is treated as the main; altKey as the alt
+            if BRutus:LinkAlt(altKey, playerKey) then
+                addLinkBox:SetText("")
+                addLinkBox:ClearFocus()
+                PopulateDetail(frame, data)
+            end
+        end
+        addLinkBtn:SetScript("OnClick", doLink)
+        addLinkBox:SetScript("OnEnterPressed", doLink)
+
+        yOff = yOff - 34
+    end
+
     -- Update scroll child height
     child:SetHeight(math.abs(yOff) + 20)
 end
@@ -884,7 +990,12 @@ function CreateAttunementRow(parent, att, yOff, width)
         nameText:SetTextColor(C.green.r, C.green.g, C.green.b)
         nameText:SetText(att.name)
         statusText:SetTextColor(C.green.r, C.green.g, C.green.b)
-        statusText:SetText("ATTUNED")
+        if att.accountWide and att.sourceChar then
+            local srcName = att.sourceChar:match("^([^-]+)") or att.sourceChar
+            statusText:SetText("ATTUNED |cff888888(conta: " .. srcName .. ")|r")
+        else
+            statusText:SetText("ATTUNED")
+        end
     elseif att.progress and att.progress > 0 then
         nameText:SetTextColor(C.gold.r, C.gold.g, C.gold.b)
         nameText:SetText(att.name)

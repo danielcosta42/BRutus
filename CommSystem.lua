@@ -16,6 +16,7 @@ CommSystem.MSG_TYPES = {
     PING      = "PI",    -- Presence ping
     PONG      = "PO",    -- Presence response
     VERSION   = "VR",    -- Version check
+    ALT_LINK  = "AL",    -- Alt/main link table sync (officer only)
 }
 
 -- Throttle settings
@@ -185,6 +186,13 @@ function CommSystem:OnMessageReceived(msg, _, sender)
         if BRutus.TrialTracker and BRutus:IsOfficer() then
             BRutus.TrialTracker:HandleIncoming(data)
         end
+    elseif msgType == CommSystem.MSG_TYPES.ALT_LINK then
+        if BRutus:IsOfficer() then
+            local ok, links = LibSerialize:Deserialize(data)
+            if ok and type(links) == "table" then
+                BRutus.db.altLinks = links
+            end
+        end
     end
 end
 
@@ -279,4 +287,14 @@ function CommSystem:HandleVersionCheck(_sender, data)
     if data and data ~= BRutus.VERSION then
         BRutus:Print("A different BRutus version detected: " .. tostring(data))
     end
+end
+
+----------------------------------------------------------------------
+-- Broadcast alt link table to all officers in guild
+----------------------------------------------------------------------
+function CommSystem:BroadcastAltLinks()
+    if not BRutus:IsOfficer() then return end
+    if not IsInGuild() then return end
+    local serialized = LibSerialize:Serialize(BRutus.db.altLinks or {})
+    self:SendMessage(self.MSG_TYPES.ALT_LINK, serialized)
 end

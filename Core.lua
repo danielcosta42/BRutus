@@ -146,6 +146,7 @@ local DB_DEFAULTS = {
     },
     officerNotes = {},
     trials = {},
+    altLinks = {},  -- [altKey] = mainKey  (officer-maintained, for account-wide attunement propagation)
     consumableChecks = { lastResults = {} },
 
 }
@@ -533,6 +534,51 @@ function BRutus:IsOfficer()
     if not rankIndex then return false end
     local maxRank = (self.db and self.db.settings and self.db.settings.officerMaxRank) or 2
     return rankIndex <= maxRank
+end
+
+----------------------------------------------------------------------
+-- Alt/Main linking (for account-wide attunement propagation)
+----------------------------------------------------------------------
+function BRutus:LinkAlt(altKey, mainKey)
+    if not self:IsOfficer() then return false end
+    if not altKey or not mainKey or altKey == mainKey then return false end
+    self.db.altLinks = self.db.altLinks or {}
+    -- Prevent circular links: mainKey must not itself be an alt
+    if self.db.altLinks[mainKey] then
+        self:Print("Erro: " .. mainKey .. " já é um alt. Desvincule-o antes.")
+        return false
+    end
+    self.db.altLinks[altKey] = mainKey
+    if self.CommSystem then
+        self.CommSystem:BroadcastAltLinks()
+    end
+    return true
+end
+
+function BRutus:UnlinkAlt(altKey)
+    if not self:IsOfficer() then return false end
+    self.db.altLinks = self.db.altLinks or {}
+    self.db.altLinks[altKey] = nil
+    if self.CommSystem then
+        self.CommSystem:BroadcastAltLinks()
+    end
+    return true
+end
+
+-- Returns all keys in the same account group as playerKey (includes playerKey itself)
+function BRutus:GetLinkedChars(playerKey)
+    local altLinks = (self.db and self.db.altLinks) or {}
+    -- Resolve canonical main
+    local mainKey = altLinks[playerKey] or playerKey
+    local result = { mainKey }
+    local seen = { [mainKey] = true }
+    for altK, mK in pairs(altLinks) do
+        if mK == mainKey and not seen[altK] then
+            seen[altK] = true
+            table.insert(result, altK)
+        end
+    end
+    return result
 end
 
 function BRutus:DeepCopy(orig)
