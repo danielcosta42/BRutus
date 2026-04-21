@@ -6,7 +6,7 @@
 BRutus Guild Manager
 
 ## Short Description (for search/cards)
-Premium guild management addon for TBC Anniversary. Auto-syncs gear, professions, attunements, TMB wishlists, raid attendance, loot history and more across your guild.
+Premium guild management addon for TBC Anniversary. Auto-syncs gear, professions, attunements (account-wide), TMB wishlists, raid attendance, loot history and more across your guild.
 
 ---
 
@@ -45,6 +45,8 @@ Click any member to open their full detail panel:
 - **Professions** — with rank progress bars
 - **Character Stats** — HP, Mana, STR, AGI, STA, INT, SPI
 - **Raid Attunements** — per-quest progress tracking with visual bars
+- **Account-wide attunements** — attunements completed on any linked alt are shown as complete, with the source character indicated
+- **Linked Characters** — officers can link a player's alts so their attunements are shared across the whole account group
 
 ### ⚔️ TBC Attunement Tracker
 Automatically tracks quest-based attunement progress for:
@@ -53,11 +55,18 @@ Automatically tracks quest-based attunement progress for:
 - **T6:** Hyjal Summit, Black Temple, Sunwell Plateau
 - **Heroic Keys:** HFC, Coilfang, Auchindoun, TK, Caverns of Time
 
+**Account-wide:** On TBC Anniversary, attunements are shared across all characters on the same account. BRutus supports this by allowing officers to link a player's alts — any attunement completed on any character in the group is reflected for all of them.
+
 ### 🎯 TMB Integration (That's My BiS)
 - Import TMB CSV exports with **wishlist**, **prio**, and **received loot** data
 - **Tooltip integration** — hover any item to see who has it on their wishlist
 - Syncs imported TMB data between officers via addon comms
 - Dedicated **TMB Loot** tab for browsing all imported data
+
+### 📖 Guild Recipe Browser
+- Searchable browser for all recipes known across the guild
+- **Icon-only profession filter tabs** — compact tab bar with one icon per crafting profession; hover to see the full name
+- Only crafting professions shown — gathering skills (Herbalism, Mining, Skinning, Fishing) are filtered out automatically
 
 ### ⚔️ Raid Tracker
 - Automatically detects when you enter a raid and **tracks full sessions** (start/end, boss encounters, player snapshots)
@@ -83,7 +92,6 @@ Automatically tracks quest-based attunement progress for:
 ### 📝 Officer Notes
 - Write **private notes** and apply quick-tags (Role, Priority, Status) per guild member
 - Notes are **synced between officers** in real time via addon comms
-- Duplicate detection prevents conflicts
 
 ### 👤 Trial Tracker (Officer Only)
 - Track **trial/recruit members** with configurable trial periods (default 30 days)
@@ -91,13 +99,19 @@ Automatically tracks quest-based attunement progress for:
 - **Auto-expires** overdue trials and alerts officers
 - Manage trials in the dedicated **Trials** tab
 
+### 🔐 Officer Rank Configuration (Officer Only)
+- Choose exactly which guild ranks are considered "officers" in BRutus — directly from the **Settings** tab
+- Checkbox per rank, with full rank names pulled from the guild API
+- GM is always an officer; all other ranks are configurable
+- Changes take effect immediately and sync to all other officers in the guild
+
 ### 📡 Automatic Data Sync
 - Guild members with BRutus **automatically share** their gear, professions, attunements and stats
 - Compressed protocol using LibSerialize + LibDeflate
 - Periodic background sync every 5 minutes + manual sync button
 - Zero configuration — just install and data flows
 
-### Recruitment System (Officer Only)
+### 📣 Recruitment System (Officer Only)
 - **Auto-recruit popups** — a notification appears at configurable intervals; click to post your recruitment message
 - **Send Now** button for instant posting
 - **Welcome whisper** — automatically greets new guild members with a custom message and Discord link
@@ -133,7 +147,7 @@ Automatically tracks quest-based attunement progress for:
 3. Your gear, professions, attunements and stats are automatically collected
 4. Data is compressed and shared with other BRutus users in your guild
 5. View any guild member's full character details with a single click
-6. Officers get extra tools: TMB imports, attendance tracking, loot history, trial management, and recruitment
+6. Officers get extra tools: TMB imports, attendance tracking, loot history, trial management, recruitment, alt linking, and rank configuration
 
 The more guild members who install it, the more data you'll see!
 
@@ -153,7 +167,9 @@ The more guild members who install it, the more data you'll see!
 
 - Designed specifically for **TBC Anniversary** (Interface 20505)
 - Channel messages (LookingForGroup, Trade) require a player click due to Blizzard restrictions — BRutus handles this with a clickable popup
-- Data is stored per-character in SavedVariables
+- Officer rank threshold is configurable (default: ranks 0–2). Officers can adjust it in the Settings tab
+- Data is stored per-guild in SavedVariables (isolated per guild name+realm)
+- Account-wide attunements are propagated automatically once officers link a player's alt characters
 
 ---
 

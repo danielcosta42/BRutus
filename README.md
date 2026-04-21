@@ -23,6 +23,8 @@ BRutus replaces the default guild frame with a modern, feature-rich management h
 - Profession list with progress bars and rank display
 - Character stats: HP, Mana, STR, AGI, STA, INT, SPI
 - Raid attunement progress with per-quest tracking and visual progress bars
+- **Account-wide attunements** — attunements completed on any linked alt are shown as complete with a `(conta: NomeDoChar)` indicator
+- **Linked Characters** section (officer only) — link/unlink alts to share attunement data across a player's entire account group
 
 ### Attunement Tracker
 Tracks quest-based attunement progress for all TBC raids:
@@ -40,11 +42,18 @@ Tracks quest-based attunement progress for all TBC raids:
 
 Also tracks Heroic dungeon key reputation requirements (Honor Hold/Thrallmar, Cenarion Expedition, Lower City, Sha'tar, Keepers of Time).
 
+**Account-wide propagation:** Officers can link a player's alts so that attunements completed on any character in the group are reflected across all of them — matching how Blizzard handles account-wide attunements on TBC Anniversary.
+
 ### TMB Integration (That's My BiS)
 - Import TMB CSV exports with wishlist, prio, and received loot data
 - Tooltip integration — hover any item to see who has it on their wishlist
 - Syncs imported TMB data between officers via addon comms
 - Dedicated TMB Loot tab for browsing all imported data
+
+### Guild Recipe Browser
+- Searchable browser for all recipes known across the guild
+- **Icon-only profession filter tabs** — compact tab bar with one icon per crafting profession; full name shown on hover tooltip
+- Gathering professions (Herbalism, Mining, Skinning, Fishing) are filtered out — only crafting professions shown
 
 ### Raid Tracker
 - Automatically detects when you enter a raid and tracks full sessions (start/end, boss encounters, player snapshots)
@@ -71,6 +80,12 @@ Also tracks Heroic dungeon key reputation requirements (Honor Hold/Thrallmar, Ce
 - Track trial/recruit members with configurable trial periods (default 30 days)
 - Records start date, sponsor, status (trial/approved/denied/expired), and evaluation notes
 - Auto-expires overdue trials and alerts officers
+
+### Officer Rank Configuration (Officer Only)
+- Configure which guild ranks are considered "officers" directly from the Settings tab
+- Checkboxes for each guild rank — GM is always locked as officer
+- Changes take effect immediately; only current officers can modify this setting
+- Synced across all addon instances in the guild
 
 ### Guild-Wide Data Sync
 - Automatically shares your gear, professions, attunements and stats with guildmates who have BRutus
@@ -147,8 +162,9 @@ Pressing **J** (or however you open the guild frame) opens BRutus instead of the
 ## Notes
 
 - **SendChatMessage to channels** (LookingForGroup, Trade, etc.) requires a hardware click due to Blizzard restrictions. BRutus handles this by showing a clickable popup notification instead of sending automatically.
-- Officer permission is determined by guild rank index ≤ 2 or having guild invite permission.
-- Data is stored per-character in `BRutusDB` SavedVariables.
+- Officer permission is determined by configurable guild rank threshold (default: rank ≤ 2). Adjustable in the Settings tab by current officers.
+- Data is stored per-guild in `BRutusDB` SavedVariables (isolated per guild name+realm).
+- Account-wide attunements require officers to manually link a player's alt characters via the Member Detail panel.
 
 ---
 

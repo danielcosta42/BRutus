@@ -136,17 +136,15 @@ function BRutus:CreateRecipesPanel(parent, _mainFrame)
             if iconTex then
                 icon = btn:CreateTexture(nil, "ARTWORK")
                 icon:SetSize(16, 16)
-                icon:SetPoint("LEFT", 4, 0)
+                icon:SetPoint("CENTER")
                 icon:SetTexture(iconTex)
-                label:SetPoint("LEFT", icon, "RIGHT", 3, 0)
             else
-                label:SetPoint("LEFT", 4, 0)
+                label:SetPoint("CENTER")
+                label:SetText(profName:sub(1, 3))
+                local pc = PROF_COLORS[profName] or C.silver
+                label:SetTextColor(pc.r, pc.g, pc.b)
             end
-            local shortName = profName:sub(1, 5)
-            label:SetText(shortName)
-            local pc = PROF_COLORS[profName] or C.silver
-            label:SetTextColor(pc.r, pc.g, pc.b)
-            btn:SetWidth(label:GetStringWidth() + (icon and 24 or 8) + 8)
+            btn:SetWidth(26)
         end
 
         btn.label = label
