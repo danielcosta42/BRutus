@@ -131,7 +131,6 @@ function OfficerNotes:BroadcastAllNotes()
     local notes = BRutus.db.officerNotes
     if not notes or not next(notes) then return end
 
-    local LibSerialize = LibStub("LibSerialize")
     local serialized = LibSerialize:Serialize(notes)
     BRutus.CommSystem:SendMessage("OA", serialized)
 end
@@ -140,7 +139,6 @@ end
 function OfficerNotes:HandleAllIncoming(data)
     if not BRutus:IsOfficer() then return end
 
-    local LibSerialize = LibStub("LibSerialize")
     local ok, incoming = LibSerialize:Deserialize(data)
     if not ok or type(incoming) ~= "table" then return end
 
