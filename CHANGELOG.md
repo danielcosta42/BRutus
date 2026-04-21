@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.17.0] - 2026-04-21
+
+### Added
+- add welcome message claim functionality for officers
+
+
 ## [1.16.0] - 2026-04-21
 
 ### Added
