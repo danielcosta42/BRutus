@@ -17,6 +17,8 @@ CommSystem.MSG_TYPES = {
     PONG      = "PO",    -- Presence response
     VERSION   = "VR",    -- Version check
     ALT_LINK  = "AL",    -- Alt/main link table sync (officer only)
+    RAID_DATA = "RD",    -- Raid attendance + session sync (officer only)
+    NOTES_ALL = "OA",    -- Bulk officer notes sync (officer only)
 }
 
 -- Throttle settings
@@ -37,11 +39,17 @@ function CommSystem:Initialize()
     C_Timer.NewTicker(300, function()
         if IsInGuild() then
             CommSystem:BroadcastMyData()
-            -- Officers also re-broadcast trial data periodically
-            if BRutus:IsOfficer() and BRutus.TrialTracker then
-                C_Timer.After(5, function()
-                    BRutus.TrialTracker:BroadcastTrials()
-                end)
+            if BRutus:IsOfficer() then
+                if BRutus.TrialTracker then
+                    C_Timer.After(5, function()
+                        BRutus.TrialTracker:BroadcastTrials()
+                    end)
+                end
+                if BRutus.RaidTracker then
+                    C_Timer.After(10, function()
+                        BRutus.RaidTracker:BroadcastRaidData()
+                    end)
+                end
             end
         end
     end)
@@ -193,6 +201,14 @@ function CommSystem:OnMessageReceived(msg, _, sender)
                 BRutus.db.altLinks = links
             end
         end
+    elseif msgType == CommSystem.MSG_TYPES.RAID_DATA then
+        if BRutus:IsOfficer() and BRutus.RaidTracker then
+            BRutus.RaidTracker:HandleIncoming(data)
+        end
+    elseif msgType == CommSystem.MSG_TYPES.NOTES_ALL then
+        if BRutus:IsOfficer() and BRutus.OfficerNotes then
+            BRutus.OfficerNotes:HandleAllIncoming(data)
+        end
     end
 end
 
@@ -261,6 +277,13 @@ function CommSystem:HandleRequest(sender, _data)
                 BRutus.TrialTracker:BroadcastTrials()
             end)
         end
+
+        -- Officers also send raid attendance data
+        if BRutus:IsOfficer() and BRutus.RaidTracker then
+            C_Timer.After(2, function()
+                BRutus.RaidTracker:BroadcastRaidData()
+            end)
+        end
     end)
 end
 
@@ -297,4 +320,58 @@ function CommSystem:BroadcastAltLinks()
     if not IsInGuild() then return end
     local serialized = LibSerialize:Serialize(BRutus.db.altLinks or {})
     self:SendMessage(self.MSG_TYPES.ALT_LINK, serialized)
+end
+
+----------------------------------------------------------------------
+-- Full sync: broadcast all data types in one staggered sequence
+-- Everyone: own data + request from peers
+-- Officers: alt links, trials, raid data, TMB, officer notes
+----------------------------------------------------------------------
+function CommSystem:FullSync()
+    if not IsInGuild() then
+        BRutus:Print("Not in a guild.")
+        return
+    end
+
+    -- Broadcast own member data (gear, professions, attunements, recipes)
+    self:BroadcastMyData()
+
+    -- Request fresh data from all online guild members
+    self:RequestAllData()
+
+    if not BRutus:IsOfficer() then
+        BRutus:Print("Syncing data with guild...")
+        return
+    end
+
+    -- Officer-only staggered broadcasts
+    BRutus:Print("Syncing all guild data (officer mode)...")
+
+    C_Timer.After(1, function()
+        self:BroadcastAltLinks()
+    end)
+
+    C_Timer.After(2, function()
+        if BRutus.TrialTracker then
+            BRutus.TrialTracker:BroadcastTrials()
+        end
+    end)
+
+    C_Timer.After(3, function()
+        if BRutus.RaidTracker then
+            BRutus.RaidTracker:BroadcastRaidData()
+        end
+    end)
+
+    C_Timer.After(4, function()
+        if BRutus.TMB then
+            BRutus.TMB:BroadcastTMBData()
+        end
+    end)
+
+    C_Timer.After(5, function()
+        if BRutus.OfficerNotes then
+            BRutus.OfficerNotes:BroadcastAllNotes()
+        end
+    end)
 end

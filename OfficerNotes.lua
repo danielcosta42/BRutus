@@ -121,3 +121,60 @@ function OfficerNotes:HandleIncoming(data)
 
     table.insert(BRutus.db.officerNotes[playerKey].notes, 1, note)
 end
+
+-- Bulk sync: broadcast entire officerNotes table to all officers
+function OfficerNotes:BroadcastAllNotes()
+    if not BRutus:IsOfficer() then return end
+    if not BRutus.CommSystem then return end
+    if not IsInGuild() then return end
+
+    local notes = BRutus.db.officerNotes
+    if not notes or not next(notes) then return end
+
+    local LibSerialize = LibStub("LibSerialize")
+    local serialized = LibSerialize:Serialize(notes)
+    BRutus.CommSystem:SendMessage("OA", serialized)
+end
+
+-- Handle incoming bulk officer notes
+function OfficerNotes:HandleAllIncoming(data)
+    if not BRutus:IsOfficer() then return end
+
+    local LibSerialize = LibStub("LibSerialize")
+    local ok, incoming = LibSerialize:Deserialize(data)
+    if not ok or type(incoming) ~= "table" then return end
+
+    if not BRutus.db.officerNotes then BRutus.db.officerNotes = {} end
+
+    for playerKey, playerData in pairs(incoming) do
+        if type(playerData) == "table" then
+            if not BRutus.db.officerNotes[playerKey] then
+                BRutus.db.officerNotes[playerKey] = { notes = {}, tags = {} }
+            end
+            local existing = BRutus.db.officerNotes[playerKey]
+
+            -- Merge notes: avoid duplicates by author+timestamp
+            local seen = {}
+            for _, n in ipairs(existing.notes or {}) do
+                seen[(n.author or "") .. "_" .. (n.timestamp or 0)] = true
+            end
+            for _, n in ipairs(playerData.notes or {}) do
+                local k = (n.author or "") .. "_" .. (n.timestamp or 0)
+                if not seen[k] then
+                    table.insert(existing.notes, n)
+                    seen[k] = true
+                end
+            end
+            table.sort(existing.notes, function(a, b)
+                return (a.timestamp or 0) > (b.timestamp or 0)
+            end)
+
+            -- Merge tags: incoming wins for non-empty values
+            for k, v in pairs(playerData.tags or {}) do
+                if v and v ~= "" then
+                    existing.tags[k] = v
+                end
+            end
+        end
+    end
+end

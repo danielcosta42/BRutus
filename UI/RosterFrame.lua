@@ -110,8 +110,7 @@ function BRutus.CreateRosterFrame()
     syncBtn:SetFrameLevel(titleBar:GetFrameLevel() + 5)
     syncBtn:SetScript("OnClick", function()
         if BRutus.CommSystem then
-            BRutus.CommSystem:BroadcastMyData()
-            BRutus:Print("Syncing data with guild...")
+            BRutus.CommSystem:FullSync()
         end
     end)
 

@@ -384,8 +384,7 @@ SlashCmdList["BRUTUS"] = function(msg)
         end
     elseif msg == "sync" then
         if BRutus.CommSystem then
-            BRutus.CommSystem:BroadcastMyData()
-            BRutus:Print("Broadcasting data to guild...")
+            BRutus.CommSystem:FullSync()
         end
     elseif msg == "reset" then
         if BRutus.guildKey and BRutusDB then

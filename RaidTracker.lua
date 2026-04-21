@@ -121,6 +121,11 @@ function RaidTracker:EndSession()
 
     BRutus:Print("Raid tracking ended: |cffFFD700" .. self.currentRaid.name .. "|r")
     self.currentRaid = nil
+
+    -- Broadcast updated raid data to all officer clients
+    C_Timer.After(1, function()
+        RaidTracker:BroadcastRaidData()
+    end)
 end
 
 function RaidTracker:TakeSnapshot(reason)
@@ -360,6 +365,77 @@ function RaidTracker:CountTable(t)
     local n = 0
     for _ in pairs(t) do n = n + 1 end
     return n
+end
+
+----------------------------------------------------------------------
+-- Sync raid data with other officer clients
+----------------------------------------------------------------------
+function RaidTracker:BroadcastRaidData()
+    if not BRutus:IsOfficer() then return end
+    if not BRutus.CommSystem then return end
+    if not IsInGuild() then return end
+
+    local raidDB = BRutus.db.raidTracker
+    if not raidDB then return end
+
+    -- Build a compact payload: full attendance + session metadata (no snapshots)
+    local payload = {
+        attendance = raidDB.attendance or {},
+        sessions   = {},
+    }
+    for sessionID, session in pairs(raidDB.sessions or {}) do
+        payload.sessions[sessionID] = {
+            instanceID = session.instanceID,
+            name       = session.name,
+            startTime  = session.startTime,
+            endTime    = session.endTime,
+            players    = session.players,
+            encounters = session.encounters,
+        }
+    end
+
+    local LibSerialize = LibStub("LibSerialize")
+    local serialized = LibSerialize:Serialize(payload)
+    BRutus.CommSystem:SendMessage(BRutus.CommSystem.MSG_TYPES.RAID_DATA, serialized)
+end
+
+function RaidTracker:HandleIncoming(data)
+    if not BRutus:IsOfficer() then return end
+
+    local LibSerialize = LibStub("LibSerialize")
+    local ok, payload = LibSerialize:Deserialize(data)
+    if not ok or type(payload) ~= "table" then return end
+
+    local raidDB = BRutus.db.raidTracker
+    if not raidDB.attendance then raidDB.attendance = {} end
+    if not raidDB.sessions   then raidDB.sessions   = {} end
+
+    -- Merge attendance: keep higher raid count; on tie prefer most recent lastRaid
+    for playerKey, incoming in pairs(payload.attendance or {}) do
+        local existing = raidDB.attendance[playerKey]
+        if not existing then
+            raidDB.attendance[playerKey] = incoming
+        else
+            local inRaids = incoming.raids or 0
+            local exRaids = existing.raids or 0
+            if inRaids > exRaids then
+                raidDB.attendance[playerKey] = incoming
+            elseif inRaids == exRaids then
+                local inTime = incoming.lastRaid or 0
+                local exTime = existing.lastRaid or 0
+                if inTime > exTime then
+                    raidDB.attendance[playerKey] = incoming
+                end
+            end
+        end
+    end
+
+    -- Merge sessions: add any session we don't already have
+    for sessionID, session in pairs(payload.sessions or {}) do
+        if not raidDB.sessions[sessionID] then
+            raidDB.sessions[sessionID] = session
+        end
+    end
 end
 
 ----------------------------------------------------------------------
