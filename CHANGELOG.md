@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.16.0] - 2026-04-21
+
+### Added
+- implement full sync for officer data including raid attendance and officer notes
+
+### Fixed
+- remove redundant LibSerialize initialization in BroadcastAllNotes and HandleAllIncoming functions
+
+
 ## [1.15.0] - 2026-04-21
 
 ### Added
