@@ -971,6 +971,105 @@ function BRutus:RefreshSettingsPanel(content)
     sep5:SetPoint("TOPRIGHT", -10, -yOff)
     yOff = yOff + 12
 
+    if isOfficer then
+    --------------------------------------------------------------------
+    -- OFFICER RANK CONFIGURATION (officer only)
+    --------------------------------------------------------------------
+    local rankTitle = UI:CreateHeaderText(content, "OFFICER RANKS", 12)
+    rankTitle:SetPoint("TOPLEFT", 0, -yOff)
+    yOff = yOff + 22
+
+    local rankDesc = UI:CreateText(content,
+        "Ranks marcados terão acesso a funcionalidades de officer no BRutus.",
+        10, C.silver.r, C.silver.g, C.silver.b)
+    rankDesc:SetPoint("TOPLEFT", 8, -yOff)
+    rankDesc:SetWidth(content:GetWidth() - 20)
+    yOff = yOff + 18
+
+    -- Read current max rank setting
+    local currentMaxRank = BRutus.db.settings.officerMaxRank or 2
+
+    -- Get rank names from the WoW guild control API (1-based, rank 1 = GM)
+    local numRanks = 0
+    if GuildControlGetNumRanks then
+        numRanks = GuildControlGetNumRanks() or 0
+    end
+
+    if numRanks == 0 then
+        local noRankText = UI:CreateText(content, "Guild rank info not available. Open the Guild panel first.", 10, C.silver.r, C.silver.g, C.silver.b)
+        noRankText:SetPoint("TOPLEFT", 8, -yOff)
+        yOff = yOff + 18
+    else
+        -- Checkboxes: one per rank (rank 0 = index 1 in GuildControl = GM, always checked)
+        -- We store officerMaxRank as 0-based WoW rankIndex
+        for i = 1, numRanks do
+            local rankWoWIndex = i - 1  -- convert to 0-based WoW rankIndex
+            local rankName = GuildControlGetRankName and GuildControlGetRankName(i) or ("Rank " .. rankWoWIndex)
+            if not rankName or rankName == "" then rankName = "Rank " .. rankWoWIndex end
+
+            local row = CreateFrame("Frame", nil, content, "BackdropTemplate")
+            row:SetSize(content:GetWidth() - 10, 26)
+            row:SetPoint("TOPLEFT", 0, -yOff)
+            row:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
+            row:SetBackdropColor(0.08, 0.06, 0.14, 0.5)
+
+            local isGM = (rankWoWIndex == 0)
+            local isChecked = (rankWoWIndex <= currentMaxRank)
+
+            local cb = UI:CreateCheckbox(row, rankName, 18)
+            cb:SetPoint("LEFT", 8, 0)
+            cb.checkbox:SetChecked(isChecked)
+
+            -- Rank label showing 0-based index
+            local idxLabel = UI:CreateText(row, "(rank " .. rankWoWIndex .. ")", 9, C.silver.r, C.silver.g, C.silver.b)
+            idxLabel:SetPoint("LEFT", 220, 0)
+
+            if isGM then
+                -- GM is always an officer, cannot be unchecked
+                cb.checkbox:Disable()
+                local lockNote = UI:CreateText(row, "|cff666666sempre officer|r", 9, 0.4, 0.4, 0.4)
+                lockNote:SetPoint("LEFT", 280, 0)
+            else
+            local capturedRankIndex = rankWoWIndex
+            cb.checkbox.onChanged = function(_, checked)
+                -- officerMaxRank = highest rank that is checked.
+                -- Checking a rank implicitly checks all ranks above it (lower index).
+                -- Unchecking a rank implicitly unchecks all ranks below it (higher index).
+                local newMax
+                if checked then
+                    -- Expand threshold to include this rank if it's higher
+                    newMax = math.max(capturedRankIndex, BRutus.db.settings.officerMaxRank or 0)
+                else
+                    -- Shrink threshold to exclude this rank and all below it
+                    newMax = capturedRankIndex - 1
+                    if newMax < 0 then newMax = 0 end
+                end
+                BRutus.db.settings.officerMaxRank = newMax
+                local newRankName = GuildControlGetRankName and GuildControlGetRankName(newMax + 1) or ("Rank " .. newMax)
+                BRutus:Print("Officer threshold: ranks 0-" .. newMax .. " (" .. newRankName .. " e acima são officers).")
+            end
+            end
+
+            yOff = yOff + 28
+        end
+    end
+
+    yOff = yOff + 4
+    local rankNote = UI:CreateText(content,
+        "Alteração tem efeito imediato. Reload UI necessário para recarregar módulos de officer.",
+        9, C.silver.r, C.silver.g, C.silver.b)
+    rankNote:SetPoint("TOPLEFT", 8, -yOff)
+    rankNote:SetWidth(content:GetWidth() - 20)
+    yOff = yOff + 20
+
+    end -- isOfficer (Rank config)
+
+    yOff = yOff + 8
+    local sep6 = UI:CreateSeparator(content)
+    sep6:SetPoint("TOPLEFT", 0, -yOff)
+    sep6:SetPoint("TOPRIGHT", -10, -yOff)
+    yOff = yOff + 12
+
     -- Reload UI button
     local reloadBtn = UI:CreateButton(content, "Reload UI", 120, 28)
     reloadBtn:SetPoint("TOPLEFT", 8, -yOff)

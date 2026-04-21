@@ -121,6 +121,8 @@ read_globals = {
     "GuildPromote",
     "GuildDemote",
     "GuildUninvite",
+    "GuildControlGetNumRanks",
+    "GuildControlGetRankName",
 
     -- WoW API: Dropdown menus
     "UIDropDownMenu_CreateInfo",
