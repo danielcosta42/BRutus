@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.15.0] - 2026-04-21
+
+### Added
+- enhance account-wide attunement support and improve UI for linked characters in README and CURSEFORGE
+- implement alt/main linking for account-wide attunement propagation and enhance member detail UI
+- add officer rank configuration panel and integrate WoW guild control API for rank management
+- add support for new profession 'Poisons' and enhance profession checks in RecipeTracker
+- enhance welcome message handling for new guild members with roster tracking
+- enhance item and spell crafter indexing for improved tooltip information
+- migrate data storage from BRutusDB to BRutus.db for improved modularity
+
+### Fixed
+- correct reference to guildKey in reset command for proper database reset functionality
+- correct formatting in login message and streamline playerKey assignments in member detail population
+
+
 ## [1.14.0] - 2026-04-20
 
 ### Added
