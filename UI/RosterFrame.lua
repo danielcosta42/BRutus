@@ -663,8 +663,8 @@ function BRutus.CreateRosterFrame()
             elseif sortBy == "lastSeen" then
                 va, vb = a.lastUpdate, b.lastUpdate
             elseif sortBy == "attendance" then
-                local pa = BRutus.RaidTracker and BRutus.RaidTracker:GetAttendancePercent(a.key) or 0
-                local pb = BRutus.RaidTracker and BRutus.RaidTracker:GetAttendancePercent(b.key) or 0
+                local pa = BRutus.RaidTracker and BRutus.RaidTracker:GetAttendance25ManPercent(a.key) or 0
+                local pb = BRutus.RaidTracker and BRutus.RaidTracker:GetAttendance25ManPercent(b.key) or 0
                 va, vb = pa, pb
             else
                 va, vb = a.level, b.level
@@ -1016,7 +1016,7 @@ function UpdateRosterRow(row, data, rowIndex)
 
     -- Attendance %
     if BRutus.RaidTracker then
-        local pct = BRutus.RaidTracker:GetAttendancePercent(data.key)
+        local pct = BRutus.RaidTracker:GetAttendance25ManPercent(data.key)
         if pct > 0 then
             local ar, ag, ab
             if pct >= 75 then
@@ -1082,7 +1082,11 @@ local function MemberDropdown_Initialize(self, level)
         info.notCheckable = true
         info.text = PARTY_INVITE or "Invite"
         info.func = function()
-            InviteUnit(data.name)
+            if C_PartyInfo and C_PartyInfo.InviteUnit then
+                C_PartyInfo.InviteUnit(data.name)
+            else
+                InviteUnit(data.name)
+            end
         end
         UIDropDownMenu_AddButton(info, level)
     end

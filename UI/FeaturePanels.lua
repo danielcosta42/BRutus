@@ -5,6 +5,9 @@
 local UI = BRutus.UI
 local C = BRutus.Colors
 
+-- Session filter state: true = 25-man only, false = all raids
+local _raidFilter25 = true
+
 ----------------------------------------------------------------------
 -- RAID ATTENDANCE PANEL
 ----------------------------------------------------------------------
@@ -19,9 +22,9 @@ function BRutus:CreateRaidsPanel(parent, _mainFrame)
 
     -- Status text
     local statusText = UI:CreateText(scrollParent, "", 10, C.silver.r, C.silver.g, C.silver.b)
-    statusText:SetPoint("TOPRIGHT", -180, -2)
+    statusText:SetPoint("TOPLEFT", 200, -4)
 
-    -- Export to TMB button
+    -- Export to TMB button (25-man data)
     local exportBtn = UI:CreateButton(scrollParent, "Export for TMB", 140, 22)
     exportBtn:SetPoint("TOPRIGHT", 0, 0)
     exportBtn:SetScript("OnClick", function()
@@ -31,38 +34,66 @@ function BRutus:CreateRaidsPanel(parent, _mainFrame)
             BRutus:Print("|cffFF4444Export failed:|r " .. (err or "unknown error"))
             return
         end
-        BRutus:ShowExportPopup("TMB Attendance Export", json)
+        BRutus:ShowExportPopup("TMB Attendance Export (25-man)", json)
     end)
 
-    -- Sessions list area
-    local sessionsHeader = UI:CreateHeaderText(scrollParent, "Recent Sessions", 11)
-    sessionsHeader:SetPoint("TOPLEFT", 0, -30)
+    ----------------------------------------------------------------
+    -- Sessions section (top ~40%)
+    ----------------------------------------------------------------
+    local sessionsLabel = UI:CreateHeaderText(scrollParent, "Sessions", 11)
+    sessionsLabel:SetPoint("TOPLEFT", 0, -28)
+
+    -- Filter toggle buttons
+    local filterAllBtn  = UI:CreateButton(scrollParent, "Todas", 58, 18)
+    local filter25Btn   = UI:CreateButton(scrollParent, "25-man", 62, 18)
+    filterAllBtn:SetPoint("LEFT", sessionsLabel, "RIGHT", 10, 0)
+    filter25Btn:SetPoint("LEFT", filterAllBtn,   "RIGHT",  4, 0)
 
     local sessionScroll = CreateFrame("ScrollFrame", "BRutusRaidSessionScroll", scrollParent, "UIPanelScrollFrameTemplate")
-    sessionScroll:SetPoint("TOPLEFT", 0, -50)
-    sessionScroll:SetPoint("BOTTOMRIGHT", -10, 140)
+    sessionScroll:SetPoint("TOPLEFT",     0,   -50)
+    sessionScroll:SetPoint("BOTTOMRIGHT", -10, 250)
     UI:SkinScrollBar(sessionScroll, "BRutusRaidSessionScroll")
 
     local sessionContent = CreateFrame("Frame", nil, sessionScroll)
     sessionContent:SetSize(800, 1)
     sessionScroll:SetScrollChild(sessionContent)
 
-    -- Attendance list area
-    local attHeader = UI:CreateHeaderText(scrollParent, "Member Attendance", 11)
-    attHeader:SetPoint("BOTTOMLEFT", 0, 120)
+    ----------------------------------------------------------------
+    -- Attendance section (bottom ~50%)
+    ----------------------------------------------------------------
+    local attLabel = UI:CreateHeaderText(scrollParent, "Member Attendance — 25-man only", 11)
+    attLabel:SetPoint("BOTTOMLEFT", 0, 236)
 
     local attScroll = CreateFrame("ScrollFrame", "BRutusAttendanceScroll", scrollParent, "UIPanelScrollFrameTemplate")
-    attScroll:SetPoint("BOTTOMLEFT", 0, 10)
+    attScroll:SetPoint("BOTTOMLEFT",  0,   10)
     attScroll:SetPoint("BOTTOMRIGHT", -10, 10)
+    attScroll:SetHeight(220)
     UI:SkinScrollBar(attScroll, "BRutusAttendanceScroll")
-    attScroll:SetHeight(105)
 
     local attContent = CreateFrame("Frame", nil, attScroll)
     attContent:SetSize(800, 1)
     attScroll:SetScrollChild(attContent)
 
-    parent:SetScript("OnShow", function()
+    ----------------------------------------------------------------
+    -- Filter button wiring
+    ----------------------------------------------------------------
+    local function SetFilterActive(only25)
+        _raidFilter25 = only25
+        if only25 then
+            filter25Btn:LockHighlight()
+            filterAllBtn:UnlockHighlight()
+        else
+            filterAllBtn:LockHighlight()
+            filter25Btn:UnlockHighlight()
+        end
         BRutus:RefreshRaidsPanel(sessionContent, attContent, statusText)
+    end
+
+    filterAllBtn:SetScript("OnClick", function() SetFilterActive(false) end)
+    filter25Btn:SetScript("OnClick",  function() SetFilterActive(true)  end)
+
+    parent:SetScript("OnShow", function()
+        SetFilterActive(_raidFilter25)
     end)
 end
 
@@ -71,67 +102,148 @@ function BRutus:RefreshRaidsPanel(sessionContent, attContent, statusText)
 
     -- Clear existing children
     for _, child in pairs({ sessionContent:GetChildren() }) do child:Hide() end
-    for _, child in pairs({ attContent:GetChildren() }) do child:Hide() end
+    for _, child in pairs({ attContent:GetChildren()     }) do child:Hide() end
 
-    local totalSessions = BRutus.RaidTracker:GetTotalSessions()
-    local trackingStr = BRutus.RaidTracker.trackingActive and "|cff00ff00Tracking Active|r" or "|cff888888Idle|r"
-    statusText:SetText("Sessions: " .. totalSessions .. "  |  " .. trackingStr)
+    local totalAll  = BRutus.RaidTracker:GetTotalSessions()
+    local total25   = BRutus.RaidTracker:GetTotal25ManSessions()
+    local trackStr  = BRutus.RaidTracker.trackingActive
+                      and "|cff00ff00Tracking|r" or "|cff888888Idle|r"
+    statusText:SetText(totalAll .. " sessions (" .. total25 .. " 25-man)  |  " .. trackStr)
 
-    -- Sessions list
-    local sessions = BRutus.RaidTracker:GetRecentSessions(20)
+    ----------------------------------------------------------------
+    -- Sessions list (filtered, most recent 20)
+    ----------------------------------------------------------------
+    local sessions = BRutus.RaidTracker:GetRecentSessions(20, _raidFilter25)
     local yOff = 0
-    for _, s in ipairs(sessions) do
-        local row = CreateFrame("Frame", nil, sessionContent, "BackdropTemplate")
-        row:SetSize(sessionContent:GetWidth() - 10, 22)
+    for idx, s in ipairs(sessions) do
+        local is25 = BRutus.RaidTracker:Is25Man(s.data.instanceID)
+        local row  = CreateFrame("Frame", nil, sessionContent, "BackdropTemplate")
+        row:SetSize(sessionContent:GetWidth() - 10, 20)
         row:SetPoint("TOPLEFT", 0, -yOff)
         row:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
-        row:SetBackdropColor(C.row1.r, C.row1.g, C.row1.b, C.row1.a)
+        local bg = (idx % 2 == 1) and C.row1 or C.row2
+        row:SetBackdropColor(bg.r, bg.g, bg.b, bg.a)
 
-        local raidName = UI:CreateText(row, s.data.name or "Unknown", 10, C.gold.r, C.gold.g, C.gold.b)
-        raidName:SetPoint("LEFT", 6, 0)
+        -- Raid name (gold for 25-man, silver for others)
+        local nameClr = is25 and C.gold or C.silver
+        local nameText = UI:CreateText(row, s.data.name or "Unknown", 10, nameClr.r, nameClr.g, nameClr.b)
+        nameText:SetPoint("LEFT", 6, 0)
 
-        local dateStr = date("%m/%d %H:%M", s.data.startTime or 0)
+        -- 25-man badge
+        if is25 then
+            local badge = UI:CreateText(row, "[25]", 9, C.accent.r, C.accent.g, C.accent.b)
+            badge:SetPoint("LEFT", 165, 0)
+        end
+
+        -- PUG badge (attendance not counted)
+        if s.data.isGuildRaid == false then
+            local pugBadge = UI:CreateText(row, "[PUG]", 9, 0.6, 0.6, 0.6)
+            pugBadge:SetPoint("LEFT", is25 and 195 or 165, 0)
+        end
+
+        -- Date
+        local dateStr  = date("%m/%d %H:%M", s.data.startTime or 0)
         local dateText = UI:CreateText(row, dateStr, 10, C.silver.r, C.silver.g, C.silver.b)
         dateText:SetPoint("LEFT", 200, 0)
 
-        local playerCount = BRutus.RaidTracker:CountTable(s.data.players or {})
-        local countText = UI:CreateText(row, playerCount .. " players", 10, C.white.r, C.white.g, C.white.b)
+        -- Player count
+        local pCount    = BRutus.RaidTracker:CountTable(s.data.players or {})
+        local countText = UI:CreateText(row, pCount .. " players", 10, C.white.r, C.white.g, C.white.b)
         countText:SetPoint("LEFT", 320, 0)
 
+        -- Boss count
         local encCount = s.data.encounters and #s.data.encounters or 0
-        local encText = UI:CreateText(row, encCount .. " bosses", 10, C.accent.r, C.accent.g, C.accent.b)
+        local encText  = UI:CreateText(row, encCount .. " bosses", 10, C.accent.r, C.accent.g, C.accent.b)
         encText:SetPoint("LEFT", 420, 0)
 
-        yOff = yOff + 24
+        -- Hover tooltip: list all players (class-colored)
+        do
+            local sessionData = s.data
+            row:EnableMouse(true)
+            row:SetScript("OnEnter", function(self)
+                row:SetBackdropColor(C.rowHover.r, C.rowHover.g, C.rowHover.b, C.rowHover.a)
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:ClearLines()
+
+                local raidName2 = sessionData.name or "Unknown"
+                local dateStr2  = date("%m/%d/%Y %H:%M", sessionData.startTime or 0)
+                GameTooltip:AddLine(raidName2, C.gold.r, C.gold.g, C.gold.b)
+                GameTooltip:AddLine(dateStr2,  C.silver.r, C.silver.g, C.silver.b, true)
+                GameTooltip:AddLine(" ")
+
+                -- Collect players, look up class from members DB
+                local playerList = {}
+                for key in pairs(sessionData.players or {}) do
+                    local name = key:match("^([^-]+)") or key
+                    local memberData = BRutus.db.members and BRutus.db.members[key]
+                    local class = memberData and memberData.class or nil
+                    table.insert(playerList, { name = name, class = class, key = key })
+                end
+
+                -- Sort: by class, then by name
+                table.sort(playerList, function(a, b)
+                    local ca = a.class or "ZZZZ"
+                    local cb2 = b.class or "ZZZZ"
+                    if ca == cb2 then return a.name < b.name end
+                    return ca < cb2
+                end)
+
+                for _, p in ipairs(playerList) do
+                    local hex = "|cff" .. BRutus:GetClassColorHex(p.class)
+                    GameTooltip:AddLine(hex .. p.name .. "|r", 1, 1, 1, false)
+                end
+
+                GameTooltip:Show()
+            end)
+            row:SetScript("OnLeave", function()
+                row:SetBackdropColor(bg.r, bg.g, bg.b, bg.a)
+                GameTooltip:Hide()
+            end)
+        end
+
+        yOff = yOff + 22
     end
     sessionContent:SetHeight(math.max(1, yOff))
 
-    -- Attendance list
+    ----------------------------------------------------------------
+    -- Attendance list — always 25-man stats regardless of filter
+    ----------------------------------------------------------------
     local attData = BRutus.db.raidTracker and BRutus.db.raidTracker.attendance or {}
     local attList = {}
     for key, att in pairs(attData) do
-        table.insert(attList, { key = key, data = att })
+        if (att.raids25 or 0) > 0 then
+            table.insert(attList, { key = key, data = att })
+        end
     end
-    table.sort(attList, function(a, b) return a.data.raids > b.data.raids end)
+    table.sort(attList, function(a, b)
+        local pa = BRutus.RaidTracker:GetAttendance25ManPercent(a.key)
+        local pb = BRutus.RaidTracker:GetAttendance25ManPercent(b.key)
+        if pa == pb then
+            return (a.data.raids25 or 0) > (b.data.raids25 or 0)
+        end
+        return pa > pb
+    end)
 
     yOff = 0
-    for _, entry in ipairs(attList) do
+    for idx, entry in ipairs(attList) do
         local row = CreateFrame("Frame", nil, attContent, "BackdropTemplate")
         row:SetSize(attContent:GetWidth() - 10, 20)
         row:SetPoint("TOPLEFT", 0, -yOff)
         row:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
-        row:SetBackdropColor(C.row2.r, C.row2.g, C.row2.b, C.row2.a)
+        local bg = (idx % 2 == 1) and C.row1 or C.row2
+        row:SetBackdropColor(bg.r, bg.g, bg.b, bg.a)
 
         local nameText = UI:CreateText(row, entry.key:match("^([^-]+)") or entry.key, 10, C.white.r, C.white.g, C.white.b)
         nameText:SetPoint("LEFT", 6, 0)
 
-        local pct = BRutus.RaidTracker:GetAttendancePercent(entry.key)
-        local pctColor = pct >= 75 and C.green or (pct >= 50 and C.gold or C.red)
-        local pctText = UI:CreateText(row, pct .. "%", 10, pctColor.r, pctColor.g, pctColor.b)
+        local pct      = BRutus.RaidTracker:GetAttendance25ManPercent(entry.key)
+        local pctClr   = pct >= 75 and C.green or (pct >= 50 and C.gold or C.red)
+        local pctText  = UI:CreateText(row, pct .. "%", 10, pctClr.r, pctClr.g, pctClr.b)
         pctText:SetPoint("LEFT", 200, 0)
 
-        local raidsText = UI:CreateText(row, entry.data.raids .. "/" .. totalSessions, 10, C.silver.r, C.silver.g, C.silver.b)
-        raidsText:SetPoint("LEFT", 280, 0)
+        local raids25  = entry.data.raids25 or 0
+        local fracText = UI:CreateText(row, raids25 .. "/" .. total25, 10, C.silver.r, C.silver.g, C.silver.b)
+        fracText:SetPoint("LEFT", 270, 0)
 
         yOff = yOff + 22
     end

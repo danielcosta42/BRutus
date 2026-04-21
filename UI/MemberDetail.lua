@@ -422,10 +422,11 @@ function PopulateDetail(frame, data)
     if BRutus.RaidTracker then
         yOff = yOff - 10
         playerKey = BRutus:GetPlayerKey(data.name, data.realm or GetRealmName())
-        local att = BRutus.RaidTracker:GetAttendance(playerKey)
-        local pct = BRutus.RaidTracker:GetAttendancePercent(playerKey)
-        local totalSessions = BRutus.RaidTracker:GetTotalSessions()
-        local attStr = string.format("RAID ATTENDANCE  --  %d%%  (%d/%d raids)", pct, att.raids, totalSessions)
+        local att          = BRutus.RaidTracker:GetAttendance(playerKey)
+        local pct          = BRutus.RaidTracker:GetAttendance25ManPercent(playerKey)
+        local total25      = BRutus.RaidTracker:GetTotal25ManSessions()
+        local raids25      = att.raids25 or 0
+        local attStr = string.format("RAID ATTENDANCE  --  %d%%  (%d/%d raids, 25-man)", pct, raids25, total25)
         yOff = CreateSectionHeader(child, attStr, yOff, contentWidth)
 
         if att.lastRaid > 0 then

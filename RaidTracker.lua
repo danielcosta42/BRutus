@@ -23,6 +23,21 @@ RaidTracker.RAID_INSTANCES = {
     [409]  = "Molten Core",
 }
 
+-- Raids that count for attendance (25-man progression)
+RaidTracker.RAID_25MAN = {
+    [544] = true,  -- Magtheridon's Lair
+    [565] = true,  -- Gruul's Lair
+    [548] = true,  -- Serpentshrine Cavern
+    [550] = true,  -- Tempest Keep
+    [534] = true,  -- Hyjal Summit
+    [564] = true,  -- Black Temple
+    [580] = true,  -- Sunwell Plateau
+}
+
+function RaidTracker:Is25Man(instanceID)
+    return self.RAID_25MAN[instanceID] == true
+end
+
 RaidTracker.currentRaid = nil
 RaidTracker.trackingActive = false
 RaidTracker.snapshotTimer = nil
@@ -100,6 +115,42 @@ function RaidTracker:StartSession(instanceID)
     BRutus:Print("Raid tracking started: |cffFFD700" .. raidName .. "|r")
 end
 
+function RaidTracker:IsGuildRaid(session)
+    local myGuild = GetGuildInfo("player")
+    if not myGuild then return false end
+
+    local players = session.players or {}
+    local total = 0
+    local guildCount = 0
+
+    for key in pairs(players) do
+        total = total + 1
+        local name = key:match("^([^-]+)") or key
+        local memberData = BRutus.db.members and BRutus.db.members[key]
+        -- Check via member DB (fastest path — already synced)
+        if memberData then
+            guildCount = guildCount + 1
+        else
+            -- Fallback: scan guild roster for this name
+            local numMembers = GetNumGuildMembers() or 0
+            for i = 1, numMembers do
+                local fullName = GetGuildRosterInfo(i)
+                if fullName then
+                    local short = fullName:match("^([^-]+)") or fullName
+                    if short == name then
+                        guildCount = guildCount + 1
+                        break
+                    end
+                end
+            end
+        end
+    end
+
+    if total == 0 then return false end
+    -- Require at least 50% guild members
+    return (guildCount / total) >= 0.5
+end
+
 function RaidTracker:EndSession()
     if not self.currentRaid then return end
 
@@ -116,8 +167,14 @@ function RaidTracker:EndSession()
     local sessionID = self.currentRaid.startTime
     BRutus.db.raidTracker.sessions[sessionID] = self.currentRaid
 
-    -- Update attendance records
-    self:UpdateAttendanceRecords(self.currentRaid)
+    -- Only count attendance if this was a guild raid (≥50% guild members)
+    if self:IsGuildRaid(self.currentRaid) then
+        self.currentRaid.isGuildRaid = true
+        self:UpdateAttendanceRecords(self.currentRaid)
+    else
+        self.currentRaid.isGuildRaid = false
+        BRutus:Print("|cffFF9900Raid ended — less than 50% guild members, attendance not counted.|r")
+    end
 
     BRutus:Print("Raid tracking ended: |cffFFD700" .. self.currentRaid.name .. "|r")
     self.currentRaid = nil
@@ -292,6 +349,12 @@ function RaidTracker:UpdateAttendanceRecords(session)
 
         score = math.max(0, math.min(100, score))
         att[playerKey].totalScore = att[playerKey].totalScore + score
+
+        -- Track 25-man raids separately for attendance accounting
+        if self:Is25Man(session.instanceID) then
+            att[playerKey].raids25      = (att[playerKey].raids25 or 0) + 1
+            att[playerKey].totalScore25 = (att[playerKey].totalScore25 or 0) + score
+        end
     end
 end
 
@@ -307,6 +370,16 @@ function RaidTracker:GetTotalSessions()
     local count = 0
     for _ in pairs(BRutus.db.raidTracker.sessions) do
         count = count + 1
+    end
+    return count
+end
+
+function RaidTracker:GetTotal25ManSessions()
+    local count = 0
+    for _, session in pairs(BRutus.db.raidTracker.sessions) do
+        if self:Is25Man(session.instanceID) then
+            count = count + 1
+        end
     end
     return count
 end
@@ -327,11 +400,25 @@ function RaidTracker:GetAttendancePercent(playerKey)
     return math.floor((att.raids / total) * 100 + 0.5)
 end
 
-function RaidTracker:GetRecentSessions(limit)
+function RaidTracker:GetAttendance25ManPercent(playerKey)
+    local total = self:GetTotal25ManSessions()
+    if total == 0 then return 0 end
+    local att = self:GetAttendance(playerKey)
+    local raids25 = att.raids25 or 0
+    if raids25 == 0 then return 0 end
+    if att.totalScore25 then
+        return math.floor(att.totalScore25 / (total * 100) * 100 + 0.5)
+    end
+    return math.floor((raids25 / total) * 100 + 0.5)
+end
+
+function RaidTracker:GetRecentSessions(limit, only25)
     limit = limit or 20
     local sessions = {}
     for id, session in pairs(BRutus.db.raidTracker.sessions) do
-        table.insert(sessions, { id = id, data = session })
+        if not only25 or self:Is25Man(session.instanceID) then
+            table.insert(sessions, { id = id, data = session })
+        end
     end
     table.sort(sessions, function(a, b) return a.id > b.id end)
     local result = {}
@@ -355,6 +442,14 @@ function RaidTracker:DeleteSession(sessionID)
                 -- Approximate: remove average score per session for this player
                 local avgScore = att.raids > 0 and (att.totalScore / (att.raids + 1)) or 100
                 att.totalScore = math.max(0, att.totalScore - avgScore)
+            end
+            -- Also decrement 25-man counters if applicable
+            if self:Is25Man(session.instanceID) then
+                att.raids25 = math.max(0, (att.raids25 or 1) - 1)
+                if att.totalScore25 then
+                    local avg25 = att.raids25 > 0 and (att.totalScore25 / (att.raids25 + 1)) or 100
+                    att.totalScore25 = math.max(0, att.totalScore25 - avg25)
+                end
             end
         end
     end
@@ -443,8 +538,8 @@ end
 -- TMB expects: { "character_name": { "attendance_percentage": N }, ... }
 ----------------------------------------------------------------------
 function RaidTracker:ExportForTMB()
-    local total = self:GetTotalSessions()
-    if total == 0 then return nil, "No raid sessions recorded." end
+    local total = self:GetTotal25ManSessions()
+    if total == 0 then return nil, "No 25-man raid sessions recorded." end
 
     local att = BRutus.db.raidTracker.attendance or {}
     local lines = {}
@@ -453,12 +548,13 @@ function RaidTracker:ExportForTMB()
     local entries = {}
     for playerKey, data in pairs(att) do
         local name = playerKey:match("^([^-]+)")
-        if name and data.raids > 0 then
-            local pct = self:GetAttendancePercent(playerKey)
+        local raids25 = data.raids25 or 0
+        if name and raids25 > 0 then
+            local pct = self:GetAttendance25ManPercent(playerKey)
             table.insert(entries, {
                 name = name,
                 pct = pct,
-                raids = data.raids,
+                raids = raids25,
             })
         end
     end
