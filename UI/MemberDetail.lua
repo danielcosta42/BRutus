@@ -421,7 +421,7 @@ function PopulateDetail(frame, data)
     ----------------------------------------------------------------
     if BRutus.RaidTracker then
         yOff = yOff - 10
-        local playerKey = BRutus:GetPlayerKey(data.name, data.realm or GetRealmName())
+        playerKey = BRutus:GetPlayerKey(data.name, data.realm or GetRealmName())
         local att = BRutus.RaidTracker:GetAttendance(playerKey)
         local pct = BRutus.RaidTracker:GetAttendancePercent(playerKey)
         local totalSessions = BRutus.RaidTracker:GetTotalSessions()
@@ -444,7 +444,7 @@ function PopulateDetail(frame, data)
     ----------------------------------------------------------------
     if BRutus.LootTracker then
         yOff = yOff - 10
-        local playerKey = BRutus:GetPlayerKey(data.name, data.realm or GetRealmName())
+        playerKey = BRutus:GetPlayerKey(data.name, data.realm or GetRealmName())
         local lootCount = BRutus.LootTracker:GetLootCount(playerKey)
         local lootHeader = "LOOT HISTORY  --  " .. lootCount .. " items"
         yOff = CreateSectionHeader(child, lootHeader, yOff, contentWidth)
@@ -486,7 +486,7 @@ function PopulateDetail(frame, data)
     -- Section: Trial Status (officer only)
     ----------------------------------------------------------------
     if BRutus.TrialTracker and BRutus:IsOfficer() then
-        local playerKey = BRutus:GetPlayerKey(data.name, data.realm or GetRealmName())
+        playerKey = BRutus:GetPlayerKey(data.name, data.realm or GetRealmName())
         local trial = BRutus.TrialTracker:GetTrial(playerKey)
         if trial then
             yOff = yOff - 10
@@ -608,7 +608,7 @@ function PopulateDetail(frame, data)
     ----------------------------------------------------------------
     if BRutus.OfficerNotes and BRutus:IsOfficer() then
         yOff = yOff - 10
-        local playerKey = BRutus:GetPlayerKey(data.name, data.realm or GetRealmName())
+        playerKey = BRutus:GetPlayerKey(data.name, data.realm or GetRealmName())
         local notes = BRutus.OfficerNotes:GetNotes(playerKey)
         local notesHeader = "OFFICER NOTES  --  " .. #notes .. " notes"
         yOff = CreateSectionHeader(child, notesHeader, yOff, contentWidth)
@@ -652,7 +652,6 @@ function PopulateDetail(frame, data)
         yOff = yOff - 10
         local linkedKeys = BRutus:GetLinkedChars(playerKey)
         local altLinks = (BRutus.db and BRutus.db.altLinks) or {}
-        local myMainKey = altLinks[playerKey]  -- nil if playerKey is a main
 
         -- Header shows how many chars are linked
         local linkCount = #linkedKeys - 1  -- exclude self

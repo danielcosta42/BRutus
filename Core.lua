@@ -250,7 +250,7 @@ end
 
 function BRutus:OnLogin()
     if not IsInGuild() then
-        self:Print("|cff888888Not in a guild \u2014 addon inactive.|r")
+        self:Print("|cff888888Not in a guild - addon inactive.|r")
         return
     end
 
