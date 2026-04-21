@@ -471,8 +471,21 @@ function Recruitment:RegisterWelcomeEvent()
         -- Add to known members
         Recruitment._knownMembers[newMember] = true
 
-        -- Send welcome in guild chat after a short delay
-        C_Timer.After(3, function()
+        -- Random delay 3-7s so only the first officer to fire actually sends.
+        -- Before sending, re-check the claim flag (another officer may have
+        -- already claimed via CommSystem WC message and set it back to true).
+        local delay = 3 + math.random() * 4
+        C_Timer.After(delay, function()
+            -- Re-check: another BRutus client may have claimed in the meantime
+            if Recruitment._welcomedRecently[newMember .. "_sent"] then return end
+            Recruitment._welcomedRecently[newMember .. "_sent"] = true
+
+            -- Broadcast claim so other officer clients suppress their sends
+            if BRutus.CommSystem then
+                BRutus.CommSystem:SendMessage(
+                    BRutus.CommSystem.MSG_TYPES.WELCOME_CLAIM, newMember)
+            end
+
             local settings = BRutus.db.recruitment
             local welcomeMsg = settings.welcomeMessage
             if welcomeMsg and welcomeMsg ~= "" then

@@ -19,6 +19,7 @@ CommSystem.MSG_TYPES = {
     ALT_LINK  = "AL",    -- Alt/main link table sync (officer only)
     RAID_DATA = "RD",    -- Raid attendance + session sync (officer only)
     NOTES_ALL = "OA",    -- Bulk officer notes sync (officer only)
+    WELCOME_CLAIM = "WC",-- Welcome message claimed for a member (officer only)
 }
 
 -- Throttle settings
@@ -208,6 +209,12 @@ function CommSystem:OnMessageReceived(msg, _, sender)
     elseif msgType == CommSystem.MSG_TYPES.NOTES_ALL then
         if BRutus:IsOfficer() and BRutus.OfficerNotes then
             BRutus.OfficerNotes:HandleAllIncoming(data)
+        end
+    elseif msgType == CommSystem.MSG_TYPES.WELCOME_CLAIM then
+        -- Another officer claimed the welcome for this member — suppress ours
+        if BRutus.Recruitment and data and data ~= "" then
+            BRutus.Recruitment._welcomedRecently[data] = true
+            BRutus.Recruitment._welcomedRecently[data .. "_sent"] = true
         end
     end
 end
