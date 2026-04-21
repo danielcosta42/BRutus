@@ -388,8 +388,8 @@ SlashCmdList["BRUTUS"] = function(msg)
             BRutus:Print("Broadcasting data to guild...")
         end
     elseif msg == "reset" then
-        if self.guildKey and BRutusDB then
-            BRutusDB[self.guildKey] = nil
+        if BRutus.guildKey and BRutusDB then
+            BRutusDB[BRutus.guildKey] = nil
         end
         ReloadUI()
     elseif msg:match("^recruit") then
