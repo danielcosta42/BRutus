@@ -40,3 +40,4 @@ UI\RecipesPanel.lua
 UI\FeaturePanels.lua
 UI\RosterFrame.lua
 UI\MemberDetail.lua
+UI\RaidHUD.lua

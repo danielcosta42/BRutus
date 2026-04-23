@@ -85,6 +85,15 @@ ConsumableChecker.CONSUMABLES = {
 
 ConsumableChecker.lastCheck = nil
 
+-- Display order and representative spell IDs for column icons
+ConsumableChecker.COLUMN_ORDER = {
+    { key = "flask",          icon = 28521  }, -- Flask of Blinding Light
+    { key = "food",           icon = 33254  }, -- Well Fed
+    { key = "weaponBuff",     icon = 25123  }, -- Brilliant Wizard Oil
+    { key = "battleElixir",   icon = 28497  }, -- Elixir of Major Agility
+    { key = "guardianElixir", icon = 28502  }, -- Elixir of Major Mageblood
+}
+
 function ConsumableChecker:Initialize()
     if not BRutus.db.consumableChecks then
         BRutus.db.consumableChecks = { lastResults = {} }
@@ -121,16 +130,18 @@ function ConsumableChecker:CheckRaid()
             for catKey, category in pairs(self.CONSUMABLES) do
                 local found = false
                 local foundName = nil
+                local foundID = nil
                 for buffID, buffName in pairs(category.buffs) do
-                    local auraName = self:UnitHasBuff(unit, buffID)
+                    local auraName = self:UnitHasBuff(unit, buffID, buffName)
                     if auraName then
                         found = true
                         foundName = buffName
+                        foundID = buffID
                         break
                     end
                 end
                 if found then
-                    playerResult.buffs[catKey] = foundName
+                    playerResult.buffs[catKey] = { name = foundName, id = foundID }
                 else
                     table.insert(playerResult.missing, category.label)
                 end
@@ -148,11 +159,18 @@ function ConsumableChecker:CheckRaid()
     return results
 end
 
-function ConsumableChecker:UnitHasBuff(unit, spellID)
+function ConsumableChecker:UnitHasBuff(unit, spellID, nameHint)
     for i = 1, 40 do
-        local name, _, _, _, _, _, _, _, _, id = UnitBuff(unit, i)
+        -- TBC UnitBuff: name, rank, icon, count, debuffType, duration,
+        -- expirationTime, caster, isStealable, shouldConsolidate, spellId
+        local name, _, _, _, _, _, _, _, _, idA, idB = UnitBuff(unit, i)
         if not name then break end
-        if id == spellID then
+        -- Try spellId at both position 10 and 11 (varies by client build)
+        if idA == spellID or idB == spellID then
+            return name
+        end
+        -- Fallback: name match (English locale, exact match)
+        if nameHint and name == nameHint then
             return name
         end
     end

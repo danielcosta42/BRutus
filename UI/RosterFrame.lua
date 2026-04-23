@@ -1082,10 +1082,15 @@ local function MemberDropdown_Initialize(self, level)
         info.notCheckable = true
         info.text = PARTY_INVITE or "Invite"
         info.func = function()
+            -- Classic/TBC uses InviteByName for name-based invites
             if C_PartyInfo and C_PartyInfo.InviteUnit then
                 C_PartyInfo.InviteUnit(data.name)
+            elseif InviteByName then
+                InviteByName(data.name)
             else
-                InviteUnit(data.name)
+                -- Fallback: target player first, then invite
+                TargetUnit(data.name)
+                InviteUnit("target")
             end
         end
         UIDropDownMenu_AddButton(info, level)
