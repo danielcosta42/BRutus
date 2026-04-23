@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.19.0] - 2026-04-23
+
+### Added
+- update settings panel to mark certain features as officer-only
+
+
 ## [1.18.0] - 2026-04-23
 
 ### Added
