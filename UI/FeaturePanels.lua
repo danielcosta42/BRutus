@@ -778,12 +778,12 @@ function BRutus:RefreshSettingsPanel(content)
     local isOfficer = BRutus:IsOfficer()
 
     local modules = {
-        { key = "raidTracker",       label = "Raid Tracker",         desc = "Track raid attendance, penalties, and sessions" },
+        { key = "raidTracker",       label = "Raid Tracker",         desc = "Track raid attendance, penalties, and sessions", officerOnly = true },
         { key = "lootTracker",       label = "Loot Tracker",         desc = "Record loot drops from boss kills" },
         { key = "lootMaster",        label = "Loot Master",          desc = "Master Loot with TMB auto-council" },
         { key = "consumableChecker", label = "Consumable Checker",   desc = "Scan raid for missing flasks/food/elixirs" },
-        { key = "raidHUD",           label = "Raid CD Tracker",       desc = "Floating tracker for raid cooldowns and consumable check" },
-        { key = "tmb",               label = "TMB Integration",      desc = "That's My BiS wishlist/prio import" },
+        { key = "raidHUD",           label = "Raid CD Tracker",      desc = "Floating tracker for raid cooldowns and consumable check" },
+        { key = "tmb",               label = "TMB Integration",      desc = "That's My BiS wishlist/prio import", officerOnly = true },
         { key = "trialTracker",      label = "Trial Tracker",        desc = "Track trial member progress (officer)", officerOnly = true },
         { key = "officerNotes",      label = "Officer Notes",        desc = "Private notes on guild members (officer)", officerOnly = true },
         { key = "recruitment",       label = "Recruitment",          desc = "Auto-post recruitment messages (officer)", officerOnly = true },
