@@ -728,8 +728,7 @@ function BRutus:ShowConsumablePopup()
     local repBtn = UI:CreateButton(f, "Report to Raid", 120, 22)
     repBtn:SetPoint("TOPRIGHT", -10, -(HEADER_H + 4))
     repBtn:SetScript("OnClick", function()
-        local CC = BRutus.ConsumableChecker
-        if CC then CC:ReportToChat("RAID") end
+        if BRutus.ConsumableChecker then BRutus.ConsumableChecker:ReportToChat("RAID") end
     end)
 
     -- Column header row (icons per category)

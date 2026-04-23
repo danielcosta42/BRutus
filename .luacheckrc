@@ -86,6 +86,7 @@ read_globals = {
     "GetInventoryItemQuality",
     "GetItemInfo",
     "GetSpellInfo",
+    "GetSpellTexture",
     "GetItemQualityColor",
     "GetAverageItemLevel",
 
@@ -112,6 +113,8 @@ read_globals = {
 
     -- WoW API: Social & Group
     "InviteUnit",
+    "InviteByName",
+    "TargetUnit",
     "InspectUnit",
     "SendWho",
 
@@ -156,6 +159,7 @@ read_globals = {
     "GetNumGroupMembers",
     "IsInRaid",
     "GetRaidRosterInfo",
+    "CombatLogGetCurrentEventInfo",
 
     -- WoW API: Loot
     "IsMasterLooter",
