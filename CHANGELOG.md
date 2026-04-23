@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.18.0] - 2026-04-23
+
+### Added
+- add new WoW API globals for spell texture and invite functions
+- add RaidHUD for tracking raid cooldowns and consumable checks
+- enhance raid attendance tracking for 25-man raids and update UI components
+
+
 ## [1.17.0] - 2026-04-21
 
 ### Added
