@@ -157,8 +157,7 @@ function LootMaster:OnLootOpened()
         end
     end
 
-    if #items > 0 and self.AUTO_ANNOUNCE then
-        -- Show ML frame with available items
+    if #items > 0 then
         BRutus.LootMaster:ShowLootFrame(items)
     end
 end
@@ -988,99 +987,557 @@ function LootMaster:ShowRollPopup(itemLink, duration, itemId)
 end
 
 ----------------------------------------------------------------------
--- UI: Loot frame for ML showing available items
+-- Set active loot for direct award (without starting a roll session)
+----------------------------------------------------------------------
+function LootMaster:SetActiveLoot(link, slot, itemId)
+    self.activeLoot = {
+        link      = link,
+        slot      = slot,
+        itemId    = itemId,
+        startTime = GetServerTime(),
+        endTime   = GetServerTime(),
+    }
+    self.rolls = {}
+end
+
+----------------------------------------------------------------------
+-- UI: Loot frame for ML — auto-opens on boss kill, shows TMB priority
+-- per item; officer can award directly or open a roll for tied players.
 ----------------------------------------------------------------------
 function LootMaster:ShowLootFrame(items)
-    local C = BRutus.Colors
+    local C  = BRutus.Colors
     local UI = BRutus.UI
 
-    if self.lootFrame then
-        self.lootFrame:Hide()
-    end
+    if self.lootFrame then self.lootFrame:Hide() end
+
+    local FRAME_W = 600
+    local FRAME_H = 440
+    local LEFT_W  = 178
+    local RIGHT_X = LEFT_W + 12
+    local rightW  = FRAME_W - LEFT_W - 22
 
     local f = CreateFrame("Frame", "BRutusMLLootFrame", UIParent, "BackdropTemplate")
-    f:SetSize(280, 80 + #items * 28)
-    f:SetPoint("LEFT", UIParent, "LEFT", 20, 0)
+    f:SetSize(FRAME_W, FRAME_H)
+    f:SetPoint("CENTER", UIParent, "CENTER", 0, 60)
     f:SetBackdrop({
         bgFile   = "Interface\\Buttons\\WHITE8x8",
         edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+        edgeSize = 2,
     })
-    f:SetBackdropColor(0.06, 0.05, 0.10, 0.95)
-    f:SetBackdropBorderColor(C.accent.r, C.accent.g, C.accent.b, 0.8)
+    f:SetBackdropColor(0.06, 0.05, 0.10, 0.97)
+    f:SetBackdropBorderColor(C.accent.r, C.accent.g, C.accent.b, 0.9)
     f:SetFrameStrata("HIGH")
     f:SetMovable(true)
     f:EnableMouse(true)
     f:RegisterForDrag("LeftButton")
-    f:SetScript("OnDragStart", function(self) self:StartMoving() end)
-    f:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
+    f:SetScript("OnDragStart", f.StartMoving)
+    f:SetScript("OnDragStop",  f.StopMovingOrSizing)
 
-    local title = f:CreateFontString(nil, "OVERLAY")
-    title:SetFont("Fonts\\FRIZQT__.TTF", 12, "OUTLINE")
-    title:SetPoint("TOP", 0, -8)
-    title:SetTextColor(C.gold.r, C.gold.g, C.gold.b)
-    title:SetText("Master Loot")
+    -- Title
+    local titleText = f:CreateFontString(nil, "OVERLAY")
+    titleText:SetFont("Fonts\\FRIZQT__.TTF", 13, "OUTLINE")
+    titleText:SetPoint("TOPLEFT", 12, -10)
+    titleText:SetTextColor(C.gold.r, C.gold.g, C.gold.b)
+    titleText:SetText("Master Loot")
 
-    local yOff = -30
-    for _, item in ipairs(items) do
-        local row = CreateFrame("Button", nil, f, "BackdropTemplate")
-        row:SetSize(260, 24)
-        row:SetPoint("TOPLEFT", 10, yOff)
-        row:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
-        row:SetBackdropColor(0.10, 0.08, 0.16, 0.6)
+    -- Instance name
+    local instText = f:CreateFontString(nil, "OVERLAY")
+    instText:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
+    instText:SetPoint("TOPLEFT", 132, -12)
+    instText:SetTextColor(C.silver.r, C.silver.g, C.silver.b)
+    local instName = GetInstanceInfo and (select(1, GetInstanceInfo())) or ""
+    instText:SetText((instName and instName ~= "") and ("— " .. instName) or "")
 
-        local itemText = row:CreateFontString(nil, "OVERLAY")
-        itemText:SetFont("Fonts\\FRIZQT__.TTF", 11, "OUTLINE")
-        itemText:SetPoint("LEFT", 6, 0)
-        itemText:SetText(item.link)
+    -- Close
+    local closeBtn = UI:CreateCloseButton(f)
+    closeBtn:SetPoint("TOPRIGHT", -6, -6)
+    closeBtn:SetScript("OnClick", function() f:Hide() end)
 
-        -- Click to announce
-        row:SetScript("OnClick", function()
-            LootMaster:AnnounceItem(item.link, item.slot)
-            LootMaster:ShowRollFrame()
-        end)
-        row:SetScript("OnEnter", function(self)
-            self:SetBackdropColor(0.18, 0.14, 0.28, 0.8)
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetHyperlink(item.link)
-            GameTooltip:Show()
-        end)
-        row:SetScript("OnLeave", function(self)
-            self:SetBackdropColor(0.10, 0.08, 0.16, 0.6)
-            GameTooltip:Hide()
-        end)
+    -- Title separator
+    local titleSep = f:CreateTexture(nil, "ARTWORK")
+    titleSep:SetTexture("Interface\\Buttons\\WHITE8x8")
+    titleSep:SetHeight(1)
+    titleSep:SetPoint("TOPLEFT",  8, -26)
+    titleSep:SetPoint("TOPRIGHT", -8, -26)
+    titleSep:SetVertexColor(C.accent.r, C.accent.g, C.accent.b, 0.4)
 
-        yOff = yOff - 28
+    -- Vertical divider between left and right
+    local vDiv = f:CreateTexture(nil, "ARTWORK")
+    vDiv:SetTexture("Interface\\Buttons\\WHITE8x8")
+    vDiv:SetWidth(1)
+    vDiv:SetPoint("TOPLEFT",    LEFT_W + 4, -28)
+    vDiv:SetPoint("BOTTOMLEFT", LEFT_W + 4, 42)
+    vDiv:SetVertexColor(C.border.r, C.border.g, C.border.b, 0.5)
+
+    ----------------------------------------------------------------
+    -- Left panel: items list
+    ----------------------------------------------------------------
+    local itemsLabel = f:CreateFontString(nil, "OVERLAY")
+    itemsLabel:SetFont("Fonts\\FRIZQT__.TTF", 9, "OUTLINE")
+    itemsLabel:SetPoint("TOPLEFT", 8, -30)
+    itemsLabel:SetTextColor(C.accent.r, C.accent.g, C.accent.b)
+    itemsLabel:SetText("LOOT  (" .. #items .. ")")
+
+    local awardedSlots = {}
+    local selectedBtn  = nil
+    local selectedItem = nil
+    local itemBtns     = {}
+
+    ----------------------------------------------------------------
+    -- Right panel: selected item header + column headers
+    ----------------------------------------------------------------
+    local selItemText = f:CreateFontString(nil, "OVERLAY")
+    selItemText:SetFont("Fonts\\FRIZQT__.TTF", 12, "OUTLINE")
+    selItemText:SetPoint("TOPLEFT", RIGHT_X, -30)
+    selItemText:SetWidth(rightW - 10)
+    selItemText:SetJustifyH("LEFT")
+    selItemText:SetText("|cff888888Select an item from the left.|r")
+
+    -- Column headers
+    local prioHdr = CreateFrame("Frame", nil, f, "BackdropTemplate")
+    prioHdr:SetSize(rightW, 16)
+    prioHdr:SetPoint("TOPLEFT", RIGHT_X, -48)
+    prioHdr:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
+    prioHdr:SetBackdropColor(0.04, 0.04, 0.08, 1)
+    local function PH(txt, x)
+        local t = prioHdr:CreateFontString(nil, "OVERLAY")
+        t:SetFont("Fonts\\FRIZQT__.TTF", 8, "OUTLINE")
+        t:SetPoint("LEFT", x, 0)
+        t:SetTextColor(C.accent.r, C.accent.g, C.accent.b)
+        t:SetText(txt)
+    end
+    PH("#", 4); PH("TYPE", 22); PH("ORDER", 64); PH("PLAYER", 106); PH("IN RAID", 260)
+
+    -- Priority scroll area
+    local prioContainer = CreateFrame("Frame", nil, f)
+    prioContainer:SetPoint("TOPLEFT",     RIGHT_X, -66)
+    prioContainer:SetPoint("BOTTOMRIGHT", -8,       42)
+
+    local prioScroll = CreateFrame("ScrollFrame", "BRutusMLPrioScroll", prioContainer, "UIPanelScrollFrameTemplate")
+    prioScroll:SetPoint("TOPLEFT",     0, 0)
+    prioScroll:SetPoint("BOTTOMRIGHT", 0, 0)
+    UI:SkinScrollBar(prioScroll, "BRutusMLPrioScroll")
+
+    local prioChild = CreateFrame("Frame", nil, prioScroll)
+    prioChild:SetWidth(rightW - 20)
+    prioChild:SetHeight(1)
+    prioScroll:SetScrollChild(prioChild)
+
+    prioContainer:SetScript("OnSizeChanged", function(self)
+        prioChild:SetWidth(math.max(1, self:GetWidth() - 20))
+    end)
+
+    -- Bottom row: status text + Roll + Award buttons
+    local statusText = f:CreateFontString(nil, "OVERLAY")
+    statusText:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
+    statusText:SetPoint("BOTTOMLEFT", RIGHT_X, 14)
+    statusText:SetWidth(rightW - 290)
+    statusText:SetJustifyH("LEFT")
+    statusText:SetText("")
+
+    local awardTopBtn = UI:CreateButton(f, "Award #1", 140, 26)
+    awardTopBtn:SetPoint("BOTTOMRIGHT", -10, 10)
+    awardTopBtn:Disable()
+
+    local openRollBtn = UI:CreateButton(f, "Open Roll", 120, 26)
+    openRollBtn:SetPoint("RIGHT", awardTopBtn, "LEFT", -6, 0)
+
+    local topCandidate = nil
+    local tiedCount    = 0
+
+    ----------------------------------------------------------------
+    -- Helper: build raid-member name→class lookup
+    ----------------------------------------------------------------
+    local function BuildRaidMap()
+        local map = {}
+        local n = GetNumGroupMembers()
+        for i = 1, n do
+            local unit = IsInRaid() and ("raid" .. i) or ("party" .. i)
+            local name = UnitName(unit)
+            if name then
+                map[strlower(name)] = select(2, UnitClass(unit)) or "UNKNOWN"
+            end
+        end
+        local myName = UnitName("player")
+        if myName then
+            map[strlower(myName)] = select(2, UnitClass("player")) or "UNKNOWN"
+        end
+        return map
     end
 
-    -- TMB-only toggle
+    ----------------------------------------------------------------
+    -- Helper: do the award + TMB record + UI update
+    ----------------------------------------------------------------
+    local function DoAward(item, entryName)
+        local iId = tonumber(item.link:match("item:(%d+)"))
+        LootMaster:SetActiveLoot(item.link, item.slot, iId)
+        LootMaster:AwardLoot(entryName)
+        if BRutus.TMB and iId then
+            BRutus.TMB:RecordReceived(entryName, iId, item.link)
+        end
+        awardedSlots[item.slot] = entryName
+        statusText:SetText("|cff4CFF4CAwarded to " .. entryName .. "!|r")
+        if itemBtns[item.slot] then
+            itemBtns[item.slot].awardedText:Show()
+        end
+    end
+
+    ----------------------------------------------------------------
+    -- Load priority list for a selected item
+    ----------------------------------------------------------------
+    local function LoadItem(item)
+        selectedItem = item
+        topCandidate = nil
+        tiedCount    = 0
+        statusText:SetText("")
+
+        selItemText:SetText(item.link)
+
+        -- Clear previous list
+        for _, ch in ipairs({ prioChild:GetChildren() }) do ch:Hide() end
+        for _, rg in ipairs({ prioChild:GetRegions() }) do rg:Hide() end
+
+        local itemId = tonumber(item.link:match("item:(%d+)"))
+
+        local function NoData(msg)
+            local t = prioChild:CreateFontString(nil, "OVERLAY")
+            t:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
+            t:SetPoint("TOPLEFT", 6, -14)
+            t:SetTextColor(C.silver.r, C.silver.g, C.silver.b)
+            t:SetText(msg)
+            prioChild:SetHeight(40)
+            awardTopBtn:SetText("Award #1")
+            awardTopBtn:Disable()
+            openRollBtn:SetText("Roll for All")
+        end
+
+        if not itemId then
+            NoData("Could not parse item ID.")
+            return
+        end
+
+        -- Full TMB interest list (unfiltered; we apply raid filter ourselves)
+        local interest = BRutus.TMB and BRutus.TMB:GetItemInterest(itemId) or nil
+        local candidates = {}
+        if interest then
+            for _, e in ipairs(interest) do
+                if e.type ~= "received" then
+                    table.insert(candidates, e)
+                end
+            end
+        end
+
+        if #candidates == 0 then
+            NoData("No TMB data for this item — use Open Roll.")
+            return
+        end
+
+        local raidMap = BuildRaidMap()
+
+        -- Find first in-raid candidate (candidates already sorted prio→wish→order)
+        for _, e in ipairs(candidates) do
+            if raidMap[strlower(e.name)] then
+                if not topCandidate then topCandidate = e end
+            end
+        end
+
+        -- Count how many share the exact same top tier
+        if topCandidate then
+            for _, e in ipairs(candidates) do
+                if raidMap[strlower(e.name)]
+                    and e.type  == topCandidate.type
+                    and e.order == topCandidate.order then
+                    tiedCount = tiedCount + 1
+                end
+            end
+        end
+
+        -- Update bottom buttons
+        if topCandidate then
+            if tiedCount == 1 then
+                awardTopBtn:SetText("Award → " .. topCandidate.name)
+                awardTopBtn:Enable()
+                openRollBtn:SetText("Open Roll")
+            else
+                awardTopBtn:SetText("Tied " .. tiedCount .. " — Roll")
+                awardTopBtn:Disable()
+                openRollBtn:SetText("Roll Tied (" .. tiedCount .. ")")
+            end
+        else
+            awardTopBtn:SetText("Award #1")
+            awardTopBtn:Disable()
+            openRollBtn:SetText("Roll for All")
+        end
+
+        -- Render priority rows
+        local yOff = 0
+        local rowW = math.max(10, prioChild:GetWidth())
+        if rowW < 10 then rowW = rightW - 24 end
+
+        for idx, e in ipairs(candidates) do
+            local isPresent = raidMap[strlower(e.name)] ~= nil
+            local isTopTier = topCandidate
+                and e.type  == topCandidate.type
+                and e.order == topCandidate.order
+            local rowH = 22
+
+            local row = CreateFrame("Frame", nil, prioChild, "BackdropTemplate")
+            row:SetSize(rowW, rowH)
+            row:SetPoint("TOPLEFT", 0, -yOff)
+            row:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
+
+            local bg = (idx % 2 == 1) and C.row1 or C.row2
+            local bgA = isPresent and (bg.a or 1) or (bg.a or 1) * 0.4
+
+            if isTopTier and isPresent then
+                row:SetBackdropColor(0.10, 0.12, 0.22, 1.0)
+                -- accent bar on left edge
+                local bar = row:CreateTexture(nil, "ARTWORK")
+                bar:SetTexture("Interface\\Buttons\\WHITE8x8")
+                bar:SetPoint("TOPLEFT",    0, 0)
+                bar:SetPoint("BOTTOMLEFT", 0, 0)
+                bar:SetWidth(3)
+                local tc = e.type == "prio" and C.accent or C.gold
+                bar:SetVertexColor(tc.r, tc.g, tc.b, 0.9)
+            else
+                row:SetBackdropColor(bg.r, bg.g, bg.b, bgA)
+            end
+
+            -- Column: index
+            local idxT = row:CreateFontString(nil, "OVERLAY")
+            idxT:SetFont("Fonts\\FRIZQT__.TTF", 9, "OUTLINE")
+            idxT:SetPoint("LEFT", 4, 0)
+            idxT:SetText(idx)
+            idxT:SetTextColor(
+                isPresent and C.gold.r or 0.35,
+                isPresent and C.gold.g or 0.35,
+                isPresent and C.gold.b or 0.35)
+
+            -- Column: type
+            local typeT = row:CreateFontString(nil, "OVERLAY")
+            typeT:SetFont("Fonts\\FRIZQT__.TTF", 8, "OUTLINE")
+            typeT:SetPoint("LEFT", 22, 0)
+            typeT:SetText(e.type == "prio" and "PRIO" or "WISH")
+            local tc2 = e.type == "prio" and C.accent or C.gold
+            typeT:SetTextColor(
+                isPresent and tc2.r or 0.3,
+                isPresent and tc2.g or 0.3,
+                isPresent and tc2.b or 0.3)
+
+            -- Column: order
+            local ordT = row:CreateFontString(nil, "OVERLAY")
+            ordT:SetFont("Fonts\\FRIZQT__.TTF", 8, "")
+            ordT:SetPoint("LEFT", 64, 0)
+            ordT:SetText("#" .. (e.order or "?"))
+            ordT:SetTextColor(
+                isPresent and 0.65 or 0.3,
+                isPresent and 0.65 or 0.3,
+                isPresent and 0.65 or 0.3)
+
+            -- Column: player name (class-colored if in raid)
+            local nameT = row:CreateFontString(nil, "OVERLAY")
+            nameT:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
+            nameT:SetPoint("LEFT", 106, 0)
+            nameT:SetWidth(148)
+            if isPresent then
+                local rClass = raidMap[strlower(e.name)]
+                local cr, cg, cb = BRutus:GetClassColor(rClass or e.class)
+                nameT:SetTextColor(cr, cg, cb)
+            else
+                nameT:SetTextColor(0.4, 0.4, 0.4)
+            end
+            nameT:SetText(e.name)
+
+            -- Column: in-raid indicator
+            local raidT = row:CreateFontString(nil, "OVERLAY")
+            raidT:SetFont("Fonts\\FRIZQT__.TTF", 9, "OUTLINE")
+            raidT:SetPoint("LEFT", 260, 0)
+            if isPresent then
+                raidT:SetTextColor(0.3, 1.0, 0.3)
+                raidT:SetText("IN RAID")
+            else
+                raidT:SetTextColor(0.4, 0.4, 0.4)
+                raidT:SetText("absent")
+            end
+
+            -- Award button (in-raid + ML only)
+            if isPresent and LootMaster:IsMasterLooter() then
+                local aBtn = UI:CreateButton(row, "Award", 58, 18)
+                aBtn:SetPoint("RIGHT", -4, 0)
+                local capturedEntry = e
+                local capturedItem  = item
+                aBtn:SetScript("OnClick", function()
+                    DoAward(capturedItem, capturedEntry.name)
+                    C_Timer.After(0.3, function()
+                        if selectedItem == capturedItem then
+                            LoadItem(capturedItem)
+                        end
+                    end)
+                end)
+            end
+
+            -- Row hover
+            local capturedBg   = bg
+            local capturedBgA  = bgA
+            local capturedTop  = isTopTier and isPresent
+            row:EnableMouse(true)
+            row:SetScript("OnEnter", function(self)
+                self:SetBackdropColor(C.rowHover.r, C.rowHover.g, C.rowHover.b, C.rowHover.a)
+            end)
+            row:SetScript("OnLeave", function(self)
+                if capturedTop then
+                    self:SetBackdropColor(0.10, 0.12, 0.22, 1.0)
+                else
+                    self:SetBackdropColor(capturedBg.r, capturedBg.g, capturedBg.b, capturedBgA)
+                end
+            end)
+
+            yOff = yOff + rowH + 2
+        end
+
+        -- "Already received by" section
+        if interest then
+            local recvList = {}
+            for _, e in ipairs(interest) do
+                if e.type == "received" then table.insert(recvList, e) end
+            end
+            if #recvList > 0 then
+                yOff = yOff + 6
+                local recvHdr = prioChild:CreateFontString(nil, "OVERLAY")
+                recvHdr:SetFont("Fonts\\FRIZQT__.TTF", 9, "OUTLINE")
+                recvHdr:SetPoint("TOPLEFT", 4, -yOff)
+                recvHdr:SetTextColor(C.silver.r, C.silver.g, C.silver.b)
+                recvHdr:SetText("Already received:")
+                yOff = yOff + 16
+                for _, e in ipairs(recvList) do
+                    local rt = prioChild:CreateFontString(nil, "OVERLAY")
+                    rt:SetFont("Fonts\\FRIZQT__.TTF", 9, "")
+                    rt:SetPoint("TOPLEFT", 12, -yOff)
+                    rt:SetTextColor(0.5, 0.5, 0.5)
+                    rt:SetText(e.name .. (e.receivedAt and " (" .. e.receivedAt .. ")" or ""))
+                    yOff = yOff + 16
+                end
+            end
+        end
+
+        prioChild:SetHeight(math.max(1, yOff + 8))
+    end
+
+    ----------------------------------------------------------------
+    -- Left panel: one button per loot item
+    ----------------------------------------------------------------
+    local leftYOff = 34
+    for _, item in ipairs(items) do
+        local btn = CreateFrame("Button", nil, f, "BackdropTemplate")
+        btn:SetSize(LEFT_W - 10, 32)
+        btn:SetPoint("TOPLEFT", 5, -leftYOff)
+        btn:SetBackdrop({
+            bgFile   = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Buttons\\WHITE8x8",
+            edgeSize = 1,
+        })
+        btn:SetBackdropColor(0.09, 0.07, 0.14, 0.7)
+        btn:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.3)
+
+        -- Quality-colored item name
+        local qc = BRutus.QualityColors[item.quality] or BRutus.QualityColors[4]
+        local nameT = btn:CreateFontString(nil, "OVERLAY")
+        nameT:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
+        nameT:SetPoint("TOPLEFT", 6, -4)
+        nameT:SetWidth(LEFT_W - 24)
+        nameT:SetJustifyH("LEFT")
+        nameT:SetTextColor(qc.r, qc.g, qc.b)
+        nameT:SetText(item.name or item.link)
+
+        -- "✓ awarded" badge (hidden initially)
+        local aText = btn:CreateFontString(nil, "OVERLAY")
+        aText:SetFont("Fonts\\FRIZQT__.TTF", 8, "OUTLINE")
+        aText:SetPoint("BOTTOMLEFT", 6, 3)
+        aText:SetTextColor(0.3, 1.0, 0.3)
+        aText:SetText("awarded")
+        aText:Hide()
+        btn.awardedText = aText
+
+        -- Tooltip
+        local capturedItem = item
+        btn:SetScript("OnEnter", function(self)
+            self:SetBackdropColor(C.rowHover.r, C.rowHover.g, C.rowHover.b, C.rowHover.a)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetHyperlink(capturedItem.link)
+            GameTooltip:Show()
+        end)
+        btn:SetScript("OnLeave", function(self)
+            if selectedItem == capturedItem then
+                self:SetBackdropColor(0.16, 0.10, 0.26, 0.9)
+            else
+                self:SetBackdropColor(0.09, 0.07, 0.14, 0.7)
+            end
+            GameTooltip:Hide()
+        end)
+        btn:SetScript("OnClick", function(self)
+            if selectedBtn then
+                selectedBtn:SetBackdropColor(0.09, 0.07, 0.14, 0.7)
+            end
+            selectedBtn = self
+            self:SetBackdropColor(0.16, 0.10, 0.26, 0.9)
+            LoadItem(capturedItem)
+        end)
+
+        itemBtns[item.slot] = btn
+        leftYOff = leftYOff + 34
+    end
+
+    -- TMB Council toggle (bottom-left)
     local tmbCheck = CreateFrame("CheckButton", nil, f, "UICheckButtonTemplate")
     tmbCheck:SetSize(22, 22)
-    tmbCheck:SetPoint("TOPLEFT", 10, yOff - 6)
+    tmbCheck:SetPoint("BOTTOMLEFT", 5, 14)
     tmbCheck:SetChecked(self.TMB_ONLY_MODE)
     tmbCheck:SetScript("OnClick", function(cb)
         local val = cb:GetChecked()
         LootMaster.TMB_ONLY_MODE = val
         BRutus.db.lootMaster.tmbOnlyMode = val
-        if val then
-            BRutus:Print("TMB auto-council |cff00ff00ON|r - checks TMB priority before rolling.")
-        else
-            BRutus:Print("TMB auto-council |cffFF4444OFF|r - normal roll for everyone.")
-        end
     end)
     local tmbLabel = f:CreateFontString(nil, "OVERLAY")
-    tmbLabel:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
+    tmbLabel:SetFont("Fonts\\FRIZQT__.TTF", 9, "OUTLINE")
     tmbLabel:SetPoint("LEFT", tmbCheck, "RIGHT", 2, 0)
     tmbLabel:SetTextColor(C.silver.r, C.silver.g, C.silver.b)
-    tmbLabel:SetText("TMB-only (auto-council)")
+    tmbLabel:SetText("TMB Council")
 
-    -- Resize frame to fit toggle
-    f:SetHeight(50 + #items * 28 + 30)
+    ----------------------------------------------------------------
+    -- Bottom button handlers
+    ----------------------------------------------------------------
+    awardTopBtn:SetScript("OnClick", function()
+        if not topCandidate or not selectedItem then
+            statusText:SetText("|cffFF4444No top priority candidate.|r")
+            return
+        end
+        DoAward(selectedItem, topCandidate.name)
+        C_Timer.After(0.3, function()
+            if selectedItem then LoadItem(selectedItem) end
+        end)
+    end)
 
-    -- Close
-    local closeBtn = UI:CreateCloseButton(f)
-    closeBtn:SetPoint("TOPRIGHT", -4, -4)
-    closeBtn:SetScript("OnClick", function() f:Hide() end)
+    openRollBtn:SetScript("OnClick", function()
+        if not selectedItem then
+            statusText:SetText("|cffFF4444Select an item first.|r")
+            return
+        end
+        LootMaster:AnnounceItem(selectedItem.link, selectedItem.slot)
+        LootMaster:ShowRollFrame()
+        statusText:SetText("|cffFFFF00Roll opened!|r")
+    end)
+
+    ----------------------------------------------------------------
+    -- Auto-select first item
+    ----------------------------------------------------------------
+    if #items > 0 then
+        local firstBtn = itemBtns[items[1].slot]
+        if firstBtn then
+            selectedBtn = firstBtn
+            firstBtn:SetBackdropColor(0.16, 0.10, 0.26, 0.9)
+        end
+        LoadItem(items[1])
+    end
 
     f:Show()
     self.lootFrame = f

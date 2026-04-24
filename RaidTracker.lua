@@ -41,6 +41,7 @@ end
 RaidTracker.currentRaid = nil
 RaidTracker.trackingActive = false
 RaidTracker.snapshotTimer = nil
+RaidTracker.endTimer = nil       -- grace-period timer before ending a session
 
 -- Attendance penalty weights
 RaidTracker.PENALTIES = {
@@ -61,6 +62,7 @@ function RaidTracker:Initialize()
     frame:RegisterEvent("GROUP_ROSTER_UPDATE")
     frame:RegisterEvent("ENCOUNTER_START")
     frame:RegisterEvent("ENCOUNTER_END")
+    frame:RegisterEvent("PLAYER_ENTERING_WORLD")
     frame:SetScript("OnEvent", function(_, event, ...)
         if event == "ZONE_CHANGED_NEW_AREA" then
             RaidTracker:CheckZone()
@@ -74,6 +76,14 @@ function RaidTracker:Initialize()
         elseif event == "ENCOUNTER_END" then
             local encounterID, encounterName, _, _, success = ...
             RaidTracker:OnEncounterEnd(encounterID, encounterName, success)
+        elseif event == "PLAYER_ENTERING_WORLD" then
+            -- Runs after the world fully loads; safe to access all DB data here.
+            -- Merge any leftover duplicate sessions from old sessions.
+            C_Timer.After(2, function()
+                RaidTracker:MergeDuplicateSessions()
+            end)
+            -- Only fire once per session
+            frame:UnregisterEvent("PLAYER_ENTERING_WORLD")
         end
     end)
 end
@@ -81,12 +91,36 @@ end
 function RaidTracker:CheckZone()
     local _, instanceType, _, _, _, _, _, instanceID = GetInstanceInfo()
     if instanceType == "raid" and self.RAID_INSTANCES[instanceID] then
+        -- We're inside a raid instance
+        if self.endTimer then
+            -- There was a pending end-of-session timer
+            if self.currentRaid and self.currentRaid.instanceID == instanceID then
+                -- Same raid: cancel the pending end and resume
+                self.endTimer:Cancel()
+                self.endTimer = nil
+                BRutus:Print("|cffFFAA00Raid resumed — session continuing.|r")
+                self:TakeSnapshot("raid_resumed")
+                return
+            else
+                -- Different raid: end the old session immediately then start new
+                self.endTimer:Cancel()
+                self.endTimer = nil
+                self:EndSession()
+            end
+        end
         if not self.trackingActive then
             self:StartSession(instanceID)
         end
     else
-        if self.trackingActive then
-            self:EndSession()
+        -- Outside any tracked raid instance
+        if self.trackingActive and not self.endTimer then
+            -- Start a 20-minute grace period before actually ending the session.
+            -- This covers wipes (zone to graveyard + run back) and short DCs.
+            BRutus:Print("|cffFFAA00Left raid zone — session ends in 20 min if you don't return.|r")
+            self.endTimer = C_Timer.NewTimer(1200, function()
+                self.endTimer = nil
+                RaidTracker:EndSession()
+            end)
         end
     end
 end
@@ -155,12 +189,23 @@ function RaidTracker:EndSession()
     if not self.currentRaid then return end
 
     self:TakeSnapshot("session_end")
-    self.currentRaid.endTime = GetServerTime()
+    local endTime = GetServerTime()
+    self.currentRaid.endTime = endTime
+    self.currentRaid.duration = endTime - (self.currentRaid.startTime or endTime)
     self.trackingActive = false
 
     if self.snapshotTimer then
         self.snapshotTimer:Cancel()
         self.snapshotTimer = nil
+    end
+
+    -- Discard sessions shorter than 10 minutes (likely disconnects / quick zone-ins)
+    local MIN_SESSION_DURATION = 600
+    if self.currentRaid.duration < MIN_SESSION_DURATION then
+        BRutus:Print("|cffFFAA00Raid session discarded (too short: "
+            .. self.currentRaid.duration .. "s < " .. MIN_SESSION_DURATION .. "s).|r")
+        self.currentRaid = nil
+        return
     end
 
     -- Save session
@@ -426,6 +471,132 @@ function RaidTracker:GetRecentSessions(limit, only25)
         result[i] = sessions[i]
     end
     return result
+end
+
+----------------------------------------------------------------------
+-- Merge duplicate sessions: same instanceID within a 2-hour window
+-- (repairs old DB data from before the grace-period fix was added)
+--
+-- IMPORTANT: we group by instanceID FIRST, then do adjacent-pair merge
+-- within each group. The naive all-sessions-sorted approach fails when
+-- sessions from different instances interleave chronologically (e.g.
+-- Karazhan run between two Magtheridon wipe sessions).
+----------------------------------------------------------------------
+function RaidTracker:MergeDuplicateSessions()
+    local sessions = BRutus.db.raidTracker.sessions
+    if not sessions then return 0 end
+
+    local MERGE_WINDOW = 7200  -- sessions within 2h gap = same raid night
+    local totalMerged = 0
+
+    -- Group sessions by instanceID
+    local byInstance = {}
+    for id, s in pairs(sessions) do
+        if s and s.instanceID then
+            if not byInstance[s.instanceID] then
+                byInstance[s.instanceID] = {}
+            end
+            table.insert(byInstance[s.instanceID], { id = id, data = s })
+        end
+    end
+
+    -- For each instance, sort chronologically and merge overlapping/close sessions
+    for _, list in pairs(byInstance) do
+        table.sort(list, function(a, b) return a.id < b.id end)
+
+        local changed = true
+        while changed do
+            changed = false
+            -- Rebuild list from current sessions (removes deleted entries)
+            local fresh = {}
+            for _, entry in ipairs(list) do
+                if sessions[entry.id] then
+                    table.insert(fresh, entry)
+                end
+            end
+            list = fresh
+
+            for i = 1, #list - 1 do
+                local a = list[i]
+                local b = list[i + 1]
+                if a.data and b.data then
+                    local aEnd   = a.data.endTime or (a.id + (a.data.duration or 0))
+                    local bStart = b.data.startTime or b.id
+
+                    if bStart - aEnd <= MERGE_WINDOW then
+                        -- Extend time range to cover both sessions
+                        local newEnd = math.max(
+                            a.data.endTime or a.id,
+                            b.data.endTime or b.id
+                        )
+                        a.data.endTime  = newEnd
+                        a.data.duration = newEnd - (a.data.startTime or a.id)
+
+                        -- Merge player sets
+                        for k in pairs(b.data.players or {}) do
+                            a.data.players[k] = true
+                        end
+
+                        -- Normalise nil fields on old DB records
+                        if not a.data.encounters then a.data.encounters = {} end
+                        if not a.data.snapshots  then a.data.snapshots  = {} end
+                        if not b.data.encounters then b.data.encounters = {} end
+                        if not b.data.snapshots  then b.data.snapshots  = {} end
+
+                        -- Merge encounters (deduplicate by id + startTime)
+                        local encSeen = {}
+                        for _, enc in ipairs(a.data.encounters) do
+                            encSeen[enc.id .. "_" .. (enc.startTime or 0)] = true
+                        end
+                        for _, enc in ipairs(b.data.encounters) do
+                            local ekey = enc.id .. "_" .. (enc.startTime or 0)
+                            if not encSeen[ekey] then
+                                table.insert(a.data.encounters, enc)
+                                encSeen[ekey] = true
+                            end
+                        end
+                        table.sort(a.data.encounters, function(x, y)
+                            return (x.startTime or 0) < (y.startTime or 0)
+                        end)
+
+                        -- Merge snapshots
+                        for _, snap in ipairs(b.data.snapshots) do
+                            table.insert(a.data.snapshots, snap)
+                        end
+                        table.sort(a.data.snapshots, function(x, y)
+                            return (x.time or 0) < (y.time or 0)
+                        end)
+
+                        sessions[b.id] = nil
+                        totalMerged = totalMerged + 1
+                        changed = true
+                        break
+                    end
+                end
+            end
+        end
+    end
+
+    if totalMerged > 0 then
+        BRutus:Print("|cff00FF00BRutus: merged " .. totalMerged
+            .. " duplicate raid session(s). Rebuilding attendance…|r")
+        self:RebuildAttendanceFromSessions()
+    else
+        BRutus:Print("|cffAAAAAA[BRutus] No duplicate raid sessions found.|r")
+    end
+    return totalMerged
+end
+
+----------------------------------------------------------------------
+-- Rebuild attendance table from scratch using saved sessions
+----------------------------------------------------------------------
+function RaidTracker:RebuildAttendanceFromSessions()
+    BRutus.db.raidTracker.attendance = {}
+    for _, session in pairs(BRutus.db.raidTracker.sessions) do
+        if session.isGuildRaid then
+            self:UpdateAttendanceRecords(session)
+        end
+    end
 end
 
 function RaidTracker:DeleteSession(sessionID)

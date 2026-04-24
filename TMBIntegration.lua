@@ -360,6 +360,119 @@ function TMB:GetItemInterest(itemId)
 end
 
 ----------------------------------------------------------------------
+-- Record a loot award as "received" in local TMB data
+----------------------------------------------------------------------
+function TMB:RecordReceived(charName, itemId, itemLink)
+    if not BRutus.db.tmb or not BRutus.db.tmb.data then return end
+    local key = strlower(charName)
+
+    if not BRutus.db.tmb.data[key] then
+        BRutus.db.tmb.data[key] = {
+            name = charName, class = "", isAlt = false, note = "",
+            wishlists = {}, prios = {}, received = {},
+        }
+    end
+
+    local charData = BRutus.db.tmb.data[key]
+    if not charData.received then charData.received = {} end
+
+    -- Avoid recording the same item twice in the same session
+    for _, r in ipairs(charData.received) do
+        if r.itemId == itemId and r.sessionAward then
+            return  -- already recorded this session
+        end
+    end
+
+    local receivedAt = date("%Y-%m-%d %H:%M:%S")
+    table.insert(charData.received, {
+        itemId     = itemId,
+        itemLink   = itemLink or "",
+        order      = 999,
+        receivedAt = receivedAt,
+        sessionAward = true,   -- flag: recorded by BRutus this session
+    })
+
+    -- Remove from prio/wishlist (item has been received)
+    for _, list in ipairs({ charData.prios, charData.wishlists }) do
+        for i = #list, 1, -1 do
+            if list[i].itemId == itemId then
+                table.remove(list, i)
+            end
+        end
+    end
+
+    self:RebuildItemIndex()
+    BRutus:Print(format("|cff4CFF4C[TMB]|r Recorded %s → %s",
+        itemLink or ("Item #" .. itemId), charName))
+end
+
+----------------------------------------------------------------------
+-- Remove a received entry (undo)
+----------------------------------------------------------------------
+function TMB:RemoveReceived(charName, itemId)
+    if not BRutus.db.tmb or not BRutus.db.tmb.data then return end
+    local key = strlower(charName)
+    local charData = BRutus.db.tmb.data[key]
+    if not charData or not charData.received then return end
+
+    for i = #charData.received, 1, -1 do
+        if charData.received[i].itemId == itemId then
+            table.remove(charData.received, i)
+            break
+        end
+    end
+    self:RebuildItemIndex()
+end
+
+----------------------------------------------------------------------
+-- Export received loot as TMB-compatible CSV for import
+-- Format matches the TMB export CSV so it can be re-imported
+----------------------------------------------------------------------
+function TMB:ExportReceivedCSV()
+    local tmb = BRutus.db.tmb
+    if not tmb or not tmb.data then
+        return nil, "No TMB data imported."
+    end
+
+    local lines = {}
+    table.insert(lines, "type,character_name,character_class,item_id,sort_order,is_offspec,received_at")
+
+    local entries = {}
+    for _, charData in pairs(tmb.data) do
+        if charData.received then
+            for _, r in ipairs(charData.received) do
+                if r.sessionAward then   -- only export items recorded by BRutus
+                    table.insert(entries, {
+                        name      = charData.name or "",
+                        class     = charData.class or "",
+                        itemId    = r.itemId,
+                        order     = r.order or 999,
+                        isOffspec = r.isOffspec and "1" or "0",
+                        receivedAt = r.receivedAt or "",
+                    })
+                end
+            end
+        end
+    end
+
+    if #entries == 0 then
+        return nil, "No loot recorded this session. Award items first."
+    end
+
+    table.sort(entries, function(a, b)
+        if a.name ~= b.name then return a.name < b.name end
+        return a.itemId < b.itemId
+    end)
+
+    for _, e in ipairs(entries) do
+        table.insert(lines, format('received,"%s","%s",%d,%d,%s,"%s"',
+            e.name, e.class, e.itemId, e.order, e.isOffspec, e.receivedAt))
+    end
+
+    return table.concat(lines, "\n"), nil
+end
+
+----------------------------------------------------------------------
 -- Hook GameTooltip to show TMB reservations
 ----------------------------------------------------------------------
 function TMB:HookTooltips()

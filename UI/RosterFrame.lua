@@ -1321,15 +1321,23 @@ function BRutus:CreateTMBPanel(parent, _mainFrame)
     -- Status text (left)
     local tmbStatusText = UI:CreateText(topBar, "", 11, C.white.r, C.white.g, C.white.b)
     tmbStatusText:SetPoint("LEFT", 5, 0)
-    tmbStatusText:SetWidth(450)
+    tmbStatusText:SetWidth(300)
     tmbStatusText:SetJustifyH("LEFT")
+
+    -- Loot Roll button (officer only)
+    local lootRollBtn = UI:CreateButton(topBar, "Loot Roll", 88, 24)
+    lootRollBtn:SetPoint("RIGHT", -325, 0)
+
+    -- Export CSV button (officer only)
+    local exportCsvBtn = UI:CreateButton(topBar, "Export CSV", 96, 24)
+    exportCsvBtn:SetPoint("RIGHT", -224, 0)
 
     -- Import button (right, officer only)
     local importBtn = UI:CreateButton(topBar, "Import CSV", 100, 24)
-    importBtn:SetPoint("RIGHT", -110, 0)
+    importBtn:SetPoint("RIGHT", -119, 0)
 
     -- Clear button (right, officer only)
-    local clearBtn = UI:CreateButton(topBar, "Clear Data", 100, 24)
+    local clearBtn = UI:CreateButton(topBar, "Clear Data", 110, 24)
     clearBtn:SetPoint("RIGHT", -5, 0)
 
     ----------------------------------------------------------------
@@ -1736,6 +1744,326 @@ function BRutus:CreateTMBPanel(parent, _mainFrame)
     end
 
     ----------------------------------------------------------------
+    -- Export CSV button handler
+    ----------------------------------------------------------------
+    exportCsvBtn:SetScript("OnClick", function()
+        if not BRutus:IsOfficer() then
+            BRutus:Print("Only officers can export TMB data.")
+            return
+        end
+        local csv, err = BRutus.TMB:ExportReceivedCSV()
+        if csv then
+            BRutus:ShowExportPopup("TMB Received Loot Export", csv)
+        else
+            BRutus:Print("|cffFF4444" .. (err or "Export failed.") .. "|r")
+        end
+    end)
+
+    ----------------------------------------------------------------
+    -- Loot Roll Modal
+    ----------------------------------------------------------------
+    local lootModal = CreateFrame("Frame", "BRutusTMBLootModal", UIParent, "BackdropTemplate")
+    lootModal:SetSize(520, 440)
+    lootModal:SetPoint("CENTER")
+    lootModal:SetFrameStrata("DIALOG")
+    lootModal:SetFrameLevel(100)
+    lootModal:SetBackdrop({
+        bgFile   = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = 2,
+    })
+    lootModal:SetBackdropColor(0.06, 0.06, 0.10, 0.97)
+    lootModal:SetBackdropBorderColor(C.accent.r, C.accent.g, C.accent.b, 0.8)
+    lootModal:EnableMouse(true)
+    lootModal:SetMovable(true)
+    lootModal:RegisterForDrag("LeftButton")
+    lootModal:SetScript("OnDragStart", lootModal.StartMoving)
+    lootModal:SetScript("OnDragStop", lootModal.StopMovingOrSizing)
+    lootModal:Hide()
+
+    -- Title
+    local lootTitle = UI:CreateTitle(lootModal, "Loot Roll", 14)
+    lootTitle:SetPoint("TOPLEFT", 18, -14)
+
+    -- Close button
+    local lootClose = UI:CreateCloseButton(lootModal)
+    lootClose:SetPoint("TOPRIGHT", -6, -6)
+    lootClose:SetScript("OnClick", function() lootModal:Hide() end)
+
+    -- Instruction text
+    local lootInfo = UI:CreateText(lootModal, "Paste an item link or type an item ID, then click Load.", 10, 0.6, 0.55, 0.5)
+    lootInfo:SetPoint("TOPLEFT", 18, -40)
+
+    -- Item link input
+    local linkBox = CreateFrame("EditBox", "BRutusTMBLinkBox", lootModal, "BackdropTemplate")
+    linkBox:SetSize(330, 24)
+    linkBox:SetPoint("TOPLEFT", 18, -62)
+    linkBox:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
+    linkBox:SetBackdropColor(0.05, 0.05, 0.08, 1.0)
+    linkBox:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.4)
+    linkBox:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
+    linkBox:SetTextColor(C.white.r, C.white.g, C.white.b)
+    linkBox:SetTextInsets(6, 6, 0, 0)
+    linkBox:SetAutoFocus(false)
+    linkBox:SetMaxLetters(200)
+    linkBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+
+    local linkPlaceholder = linkBox:CreateFontString(nil, "OVERLAY")
+    linkPlaceholder:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
+    linkPlaceholder:SetPoint("LEFT", 6, 0)
+    linkPlaceholder:SetTextColor(0.4, 0.4, 0.4)
+    linkPlaceholder:SetText("Paste item link or type item ID...")
+    linkBox:SetScript("OnTextChanged", function(self)
+        if self:GetText() ~= "" then linkPlaceholder:Hide() else linkPlaceholder:Show() end
+    end)
+
+    local loadBtn = UI:CreateButton(lootModal, "Load", 70, 24)
+    loadBtn:SetPoint("LEFT", linkBox, "RIGHT", 8, 0)
+
+    -- Loaded item name display
+    local loadedItemText = UI:CreateText(lootModal, "No item loaded.", 11, C.silver.r, C.silver.g, C.silver.b)
+    loadedItemText:SetPoint("TOPLEFT", 18, -96)
+    loadedItemText:SetWidth(480)
+
+    -- Separator
+    local lootSep = UI:CreateSeparator(lootModal)
+    lootSep:SetPoint("TOPLEFT", 12, -118)
+    lootSep:SetPoint("TOPRIGHT", -12, -118)
+
+    -- Column headers for interest list
+    local interestHdrFrame = CreateFrame("Frame", nil, lootModal, "BackdropTemplate")
+    interestHdrFrame:SetSize(486, 18)
+    interestHdrFrame:SetPoint("TOPLEFT", 12, -126)
+    interestHdrFrame:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
+    interestHdrFrame:SetBackdropColor(0.04, 0.04, 0.08, 1)
+
+    local function LootHdr(txt, x)
+        local t = UI:CreateText(interestHdrFrame, txt, 8, C.accent.r, C.accent.g, C.accent.b)
+        t:SetPoint("LEFT", x, 0)
+    end
+    LootHdr("TYPE", 6); LootHdr("ORDER", 60); LootHdr("PLAYER", 110); LootHdr("CLASS", 250); LootHdr("OFFSPEC?", 370)
+
+    -- Scrollable interest list
+    local interestContainer = CreateFrame("Frame", nil, lootModal)
+    interestContainer:SetPoint("TOPLEFT", 12, -148)
+    interestContainer:SetPoint("BOTTOMRIGHT", -12, 54)
+
+    local interestScroll = CreateFrame("ScrollFrame", "BRutusTMBInterestScroll", interestContainer, "UIPanelScrollFrameTemplate")
+    interestScroll:SetPoint("TOPLEFT", 0, 0)
+    interestScroll:SetPoint("BOTTOMRIGHT", 0, 0)
+    UI:SkinScrollBar(interestScroll, "BRutusTMBInterestScroll")
+
+    local interestChild = CreateFrame("Frame", nil, interestScroll)
+    interestChild:SetWidth(interestContainer:GetWidth() or 486)
+    interestChild:SetHeight(1)
+    interestScroll:SetScrollChild(interestChild)
+
+    interestContainer:SetScript("OnSizeChanged", function(self)
+        interestChild:SetWidth(self:GetWidth() - 20)
+    end)
+
+    -- Loot roll status text
+    local lootStatusText = UI:CreateText(lootModal, "", 10, C.white.r, C.white.g, C.white.b)
+    lootStatusText:SetPoint("BOTTOMLEFT", 18, 28)
+    lootStatusText:SetWidth(360)
+
+    -- Announce button (announce item in raid)
+    local announceBtn = UI:CreateButton(lootModal, "Announce", 90, 26)
+    announceBtn:SetPoint("BOTTOMRIGHT", -18, 24)
+
+    -- State variables
+    local loadedItemId   = nil
+    local loadedItemLink = nil
+
+    ----------------------------------------------------------------
+    -- Helper: populate interest list for a given itemId
+    ----------------------------------------------------------------
+    local function PopulateInterestList(itemId)
+        -- Clear previous children
+        for _, ch in ipairs({ interestChild:GetChildren() }) do ch:Hide() end
+
+        if not BRutus.TMB then
+            loadedItemText:SetText("|cffFF4444TMB module not loaded.|r")
+            return
+        end
+
+        local interest = BRutus.TMB:GetItemInterest(itemId)
+        if not interest or #interest == 0 then
+            loadedItemText:SetText(loadedItemLink or ("Item #" .. itemId) .. " |cffAAAAAA— no one wants this item.|r")
+            interestChild:SetHeight(1)
+            return
+        end
+
+        local yOff = 0
+        for idx, entry in ipairs(interest) do
+            if entry.type ~= "received" then
+                local rowH = 22
+                local row  = CreateFrame("Frame", nil, interestChild, "BackdropTemplate")
+                row:SetSize(interestChild:GetWidth() or 466, rowH)
+                row:SetPoint("TOPLEFT", 0, -yOff)
+                row:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
+                local bg = (idx % 2 == 1) and C.row1 or C.row2
+                row:SetBackdropColor(bg.r, bg.g, bg.b, bg.a)
+
+                -- Type badge
+                local typeClr = (entry.type == "prio") and C.accent or C.gold
+                local typeT   = UI:CreateText(row, entry.type == "prio" and "PRIO" or "WISH", 8, typeClr.r, typeClr.g, typeClr.b)
+                typeT:SetPoint("LEFT", 6, 0)
+
+                -- Order
+                local orderT = UI:CreateText(row, "#" .. (entry.order or "?"), 9, C.silver.r, C.silver.g, C.silver.b)
+                orderT:SetPoint("LEFT", 60, 0)
+
+                -- Player name (class colored)
+                local cr, cg, cb = BRutus:GetClassColor(entry.class)
+                local nameT = UI:CreateText(row, entry.name, 10, cr, cg, cb)
+                nameT:SetPoint("LEFT", 110, 0)
+                nameT:SetWidth(130)
+
+                -- Class
+                local classT = UI:CreateText(row, entry.class or "", 9, cr, cg, cb)
+                classT:SetPoint("LEFT", 250, 0)
+
+                -- Offspec?
+                if entry.isOffspec then
+                    local osT = UI:CreateText(row, "OS", 8, 0.6, 0.6, 0.6)
+                    osT:SetPoint("LEFT", 370, 0)
+                end
+
+                -- Award button
+                if BRutus:IsOfficer() then
+                    local awardBtn = UI:CreateButton(row, "Award", 60, 18)
+                    awardBtn:SetPoint("RIGHT", -4, 0)
+                    local capturedEntry = entry
+                    awardBtn:SetScript("OnClick", function()
+                        if not loadedItemId then return end
+                        BRutus.TMB:RecordReceived(capturedEntry.name, loadedItemId, loadedItemLink)
+                        -- Attempt in-game loot award (if ML is active)
+                        if BRutus.LootMaster and BRutus.LootMaster.AwardLoot then
+                            BRutus.LootMaster:AwardLoot(capturedEntry.name)
+                        end
+                        lootStatusText:SetText(format("|cff4CFF4CAwarded to %s!|r", capturedEntry.name))
+                        -- Refresh interest list to remove this player from prio/wish
+                        C_Timer.After(0.2, function()
+                            PopulateInterestList(loadedItemId)
+                        end)
+                    end)
+                end
+
+                -- Hover
+                local capturedBg = bg
+                row:EnableMouse(true)
+                row:SetScript("OnEnter", function(self)
+                    self:SetBackdropColor(C.rowHover.r, C.rowHover.g, C.rowHover.b, C.rowHover.a)
+                end)
+                row:SetScript("OnLeave", function(self)
+                    self:SetBackdropColor(capturedBg.r, capturedBg.g, capturedBg.b, capturedBg.a)
+                end)
+
+                yOff = yOff + rowH + 2
+            end
+        end
+
+        -- Also show "already received by" section if anyone has it
+        local recvEntries = {}
+        for _, e in ipairs(interest) do
+            if e.type == "received" then table.insert(recvEntries, e) end
+        end
+        if #recvEntries > 0 then
+            local sepT = UI:CreateText(interestChild, "Already received by:", 9, C.silver.r, C.silver.g, C.silver.b)
+            sepT:SetPoint("TOPLEFT", 4, -yOff - 4)
+            yOff = yOff + 16
+            for _, e in ipairs(recvEntries) do
+                local cr, cg, cb = BRutus:GetClassColor(e.class)
+                local rT = UI:CreateText(interestChild, "  " .. e.name .. (e.receivedAt and " (" .. e.receivedAt .. ")" or ""), 9, cr, cg, cb)
+                rT:SetPoint("TOPLEFT", 4, -yOff - 4)
+                yOff = yOff + 16
+            end
+        end
+
+        interestChild:SetHeight(math.max(1, yOff + 8))
+    end
+
+    ----------------------------------------------------------------
+    -- Parse item ID from hyperlink or raw number
+    ----------------------------------------------------------------
+    local function ParseItemId(text)
+        -- Try item hyperlink: |Hitem:12345:...|h[...]|h
+        local itemId = text:match("|Hitem:(%d+):")
+        if itemId then return tonumber(itemId) end
+        -- Try raw number
+        local raw = text:match("^%s*(%d+)%s*$")
+        if raw then return tonumber(raw) end
+        return nil
+    end
+
+    ----------------------------------------------------------------
+    -- Load button handler
+    ----------------------------------------------------------------
+    loadBtn:SetScript("OnClick", function()
+        local text = linkBox:GetText()
+        local itemId = ParseItemId(text)
+        if not itemId then
+            lootStatusText:SetText("|cffFF4444Invalid item link or ID.|r")
+            return
+        end
+        loadedItemId   = itemId
+        -- Try to preserve the full link; fall back to plain text
+        loadedItemLink = text:find("|H") and text or nil
+        lootStatusText:SetText("")
+
+        -- Try to get item name from WoW client cache
+        local itemName = GetItemInfo(itemId)
+        if itemName then
+            loadedItemText:SetText((loadedItemLink or "|cffffffff" .. itemName .. "|r") .. "  |cffAAAAAA(ID: " .. itemId .. ")|r")
+        else
+            loadedItemText:SetText("|cffffffff[Item #" .. itemId .. "]|r  |cffAAAAAA(not cached)|r")
+        end
+
+        PopulateInterestList(itemId)
+    end)
+
+    linkBox:SetScript("OnEnterPressed", function(self)
+        self:ClearFocus()
+        loadBtn:Click()
+    end)
+
+    ----------------------------------------------------------------
+    -- Announce button handler
+    ----------------------------------------------------------------
+    announceBtn:SetScript("OnClick", function()
+        if not loadedItemId then
+            lootStatusText:SetText("|cffFF4444Load an item first.|r")
+            return
+        end
+        if BRutus.LootMaster and BRutus.LootMaster.AnnounceItem then
+            BRutus.LootMaster:AnnounceItem(loadedItemId, loadedItemLink)
+            lootStatusText:SetText("|cff4CFF4CItem announced in raid.|r")
+        else
+            BRutus:Print("|cffAAAAAA[Loot Roll]|r Item: " .. (loadedItemLink or "#" .. loadedItemId))
+        end
+    end)
+
+    ----------------------------------------------------------------
+    -- Wire Loot Roll button
+    ----------------------------------------------------------------
+    lootRollBtn:SetScript("OnClick", function()
+        if not BRutus:IsOfficer() then
+            BRutus:Print("Only officers can use Loot Roll.")
+            return
+        end
+        linkBox:SetText("")
+        linkPlaceholder:Show()
+        loadedItemId   = nil
+        loadedItemLink = nil
+        loadedItemText:SetText("No item loaded.")
+        lootStatusText:SetText("")
+        for _, ch in ipairs({ interestChild:GetChildren() }) do ch:Hide() end
+        interestChild:SetHeight(1)
+        lootModal:Show()
+    end)
+
+    ----------------------------------------------------------------
     -- Import Modal
     ----------------------------------------------------------------
     local modal = CreateFrame("Frame", "BRutusTMBImportModal", UIParent, "BackdropTemplate")
@@ -1902,9 +2230,13 @@ function BRutus:CreateTMBPanel(parent, _mainFrame)
         if BRutus:IsOfficer() then
             importBtn:Show()
             clearBtn:Show()
+            lootRollBtn:Show()
+            exportCsvBtn:Show()
         else
             importBtn:Hide()
             clearBtn:Hide()
+            lootRollBtn:Hide()
+            exportCsvBtn:Hide()
         end
 
         PopulateTMBList(tmbSearch:GetText())

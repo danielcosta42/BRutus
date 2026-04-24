@@ -454,6 +454,14 @@ SlashCmdList["BRUTUS"] = function(msg)
                 BRutus:Print("|cffFF4444Export failed:|r " .. (err or "unknown error"))
             end
         end
+    elseif msg == "mergeraids" then
+        if BRutus.RaidTracker then
+            BRutus:Print("Merging duplicate raid sessions…")
+            local count = BRutus.RaidTracker:MergeDuplicateSessions()
+            if count == 0 then
+                BRutus:Print("|cffAAAAAA[BRutus] No duplicates found.|r")
+            end
+        end
     else
         BRutus:ToggleRoster()
     end
