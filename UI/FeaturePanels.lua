@@ -417,7 +417,7 @@ function BRutus:RefreshRaidsPanel(sessionContent, attContent, statusText)
             GameTooltip:AddLine("-" .. (BRutus.RaidTracker.PENALTIES.NO_CONSUMES or 10) .. " No consumables", 0.7,0.5,0.5)
             GameTooltip:AddLine("Absent sessions count as 0.", 0.6,0.6,0.6)
             GameTooltip:Show()
-            _ = capturedEntry
+            local _ = capturedEntry
         end)
         row:SetScript("OnLeave", function(self)
             self:SetBackdropColor(bg.r, bg.g, bg.b, bg.a)

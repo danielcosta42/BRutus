@@ -1078,7 +1078,6 @@ function LootMaster:ShowLootFrame(items)
     itemsLabel:SetTextColor(C.accent.r, C.accent.g, C.accent.b)
     itemsLabel:SetText("LOOT  (" .. #items .. ")")
 
-    local awardedSlots = {}
     local selectedBtn  = nil
     local selectedItem = nil
     local itemBtns     = {}
@@ -1175,7 +1174,6 @@ function LootMaster:ShowLootFrame(items)
         if BRutus.TMB and iId then
             BRutus.TMB:RecordReceived(entryName, iId, item.link)
         end
-        awardedSlots[item.slot] = entryName
         statusText:SetText("|cff4CFF4CAwarded to " .. entryName .. "!|r")
         if itemBtns[item.slot] then
             itemBtns[item.slot].awardedText:Show()
