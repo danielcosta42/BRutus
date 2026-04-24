@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.20.0] - 2026-04-24
+
+### Added
+- Add functionality to record received loot, remove entries, and export as CSV
+
+### Changed
+- remove unused variables and improve code clarity in LootMaster and FeaturePanels
+
+
 ## [1.19.0] - 2026-04-23
 
 ### Added
