@@ -197,6 +197,101 @@ function PopulateDetail(frame, data)
     local contentWidth = DETAIL_WIDTH - 35
 
     ----------------------------------------------------------------
+    -- Section: Spec
+    ----------------------------------------------------------------
+    local playerKey = BRutus:GetPlayerKey(data.name, data.realm or GetRealmName())
+    local specLabel = BRutus.SpecChecker and BRutus.SpecChecker:GetSpecLabel(playerKey)
+
+    yOff = CreateSectionHeader(child, "TALENT SPEC", yOff, contentWidth)
+    yOff = yOff - 5
+
+    if specLabel then
+        local spec = BRutus.db.members and BRutus.db.members[playerKey] and BRutus.db.members[playerKey].spec
+        local cr, cg, cb = BRutus:GetClassColor(data.class)
+
+        -- Talent distribution bar (one segment per tree)
+        if spec and spec.points and spec.names then
+            local barFrame = CreateFrame("Frame", nil, child)
+            barFrame:SetPoint("TOPLEFT", 10, yOff)
+            barFrame:SetSize(contentWidth - 20, 20)
+            barFrame:Show()
+
+            local total = 0
+            for _, pts in ipairs(spec.points) do total = total + pts end
+            if total == 0 then total = 1 end
+
+            -- Three colour shades for the three trees
+            local treeColors = {
+                { r = cr,      g = cg,      b = cb      },
+                { r = cr*0.65, g = cg*0.65, b = cb*0.65 },
+                { r = cr*0.40, g = cg*0.40, b = cb*0.40 },
+            }
+
+            local xPos = 0
+            for i, pts in ipairs(spec.points) do
+                if pts > 0 then
+                    local segW = math.floor(((pts / total) * (contentWidth - 20)) + 0.5)
+                    local seg = barFrame:CreateTexture(nil, "OVERLAY")
+                    seg:SetTexture("Interface\\Buttons\\WHITE8x8")
+                    seg:SetPoint("TOPLEFT", xPos, 0)
+                    seg:SetSize(segW, 18)
+                    local tc = treeColors[i] or treeColors[1]
+                    seg:SetVertexColor(tc.r, tc.g, tc.b, 0.85)
+                    seg:Show()
+
+                    local segLabel = barFrame:CreateFontString(nil, "OVERLAY")
+                    segLabel:SetFont("Fonts\\FRIZQT__.TTF", 9, "OUTLINE")
+                    segLabel:SetPoint("CENTER", seg, "CENTER", 0, 0)
+                    segLabel:SetText(pts .. "  " .. (spec.names[i] or ""))
+                    segLabel:SetTextColor(1, 1, 1)
+                    segLabel:Show()
+
+                    xPos = xPos + segW
+                end
+            end
+            yOff = yOff - 24
+        end
+
+        -- Text label: e.g.  "41 / 5 / 15  (Protection)"
+        local specText = child:CreateFontString(nil, "OVERLAY")
+        specText:SetFont("Fonts\\FRIZQT__.TTF", 13, "OUTLINE")
+        specText:SetPoint("TOPLEFT", 10, yOff)
+        specText:SetTextColor(cr, cg, cb)
+        specText:SetText(specLabel)
+        specText:Show()
+        yOff = yOff - 22
+
+        if spec and spec.scannedAt and spec.scannedAt > 0 then
+            local age = GetServerTime() - spec.scannedAt
+            local ageStr
+            if age < 3600 then
+                ageStr = math.floor(age / 60) .. "m ago"
+            elseif age < 86400 then
+                ageStr = math.floor(age / 3600) .. "h ago"
+            else
+                ageStr = math.floor(age / 86400) .. "d ago"
+            end
+            local scanText = child:CreateFontString(nil, "OVERLAY")
+            scanText:SetFont("Fonts\\FRIZQT__.TTF", 9, "OUTLINE")
+            scanText:SetPoint("TOPLEFT", 10, yOff)
+            scanText:SetTextColor(C.silver.r, C.silver.g, C.silver.b, 0.6)
+            scanText:SetText("Last scanned: " .. ageStr)
+            scanText:Show()
+            yOff = yOff - 18
+        end
+    else
+        local noSpec = child:CreateFontString(nil, "OVERLAY")
+        noSpec:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
+        noSpec:SetPoint("TOPLEFT", 15, yOff)
+        noSpec:SetTextColor(C.silver.r, C.silver.g, C.silver.b, 0.5)
+        noSpec:SetText("No spec data. Use /brutus specs to scan the group.")
+        noSpec:Show()
+        yOff = yOff - 25
+    end
+
+    yOff = yOff - 8
+
+    ----------------------------------------------------------------
     -- Section: Stats
     ----------------------------------------------------------------
     if data.stats then

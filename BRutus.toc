@@ -33,6 +33,7 @@ RecipeTracker.lua
 OfficerNotes.lua
 TrialTracker.lua
 ConsumableChecker.lua
+SpecChecker.lua
 
 # UI
 UI\Helpers.lua

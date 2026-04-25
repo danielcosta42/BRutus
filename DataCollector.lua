@@ -59,6 +59,12 @@ function DataCollector:CollectMyData()
     -- Collect basic stats
     data.stats = self:CollectStats()
 
+    -- Collect own spec (requires talents to be loaded)
+    if BRutus.SpecChecker then
+        local spec = BRutus.SpecChecker:CollectOwnSpec()
+        if spec then data.spec = spec end
+    end
+
     BRutus.db.members[key] = data
     BRutus.db.myData = data
 
@@ -419,6 +425,11 @@ function DataCollector:GetBroadcastData()
     -- Include attunements
     if myData.attunements then
         clean.attunements = myData.attunements
+    end
+
+    -- Include talent spec
+    if myData.spec then
+        clean.spec = myData.spec
     end
 
     -- Include recipes (keyed by profession)

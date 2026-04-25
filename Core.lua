@@ -308,6 +308,9 @@ function BRutus:InitModules()
     if BRutus.ConsumableChecker and modEnabled("consumableChecker") then
         BRutus.ConsumableChecker:Initialize()
     end
+    if BRutus.SpecChecker then
+        BRutus.SpecChecker:Initialize()
+    end
     if BRutus.RecipeTracker then
         BRutus.RecipeTracker:Initialize()
     end
@@ -461,8 +464,10 @@ SlashCmdList["BRUTUS"] = function(msg)
             if count == 0 then
                 BRutus:Print("|cffAAAAAA[BRutus] No duplicates found.|r")
             end
-        end
-    else
+        end    elseif msg == "specs" then
+        if BRutus.SpecChecker then
+            BRutus.SpecChecker:ScanGroup()
+        end    else
         BRutus:ToggleRoster()
     end
 end

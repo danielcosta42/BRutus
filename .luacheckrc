@@ -115,8 +115,7 @@ read_globals = {
     "InviteUnit",
     "InviteByName",
     "TargetUnit",
-    "InspectUnit",
-    "SendWho",
+    "InspectUnit",\n    "NotifyInspect",\n    "CanInspect",\n    "GetNumTalentTabs",\n    "GetTalentTabInfo",\n    "GetNumTalents",\n    "GetTalentInfo",\n    "SendWho",
 
     -- WoW API: Guild management
     "IsGuildLeader",
@@ -157,6 +156,7 @@ read_globals = {
     -- WoW API: Instance & Raid
     "GetInstanceInfo",
     "GetNumGroupMembers",
+    "IsInGroup",
     "IsInRaid",
     "GetRaidRosterInfo",
     "CombatLogGetCurrentEventInfo",

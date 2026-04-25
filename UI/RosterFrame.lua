@@ -1212,6 +1212,16 @@ function ShowRowTooltip(row)
     GameTooltip:AddLine(string.format("Level %d %s %s", data.level, data.race, data.classDisplay), 0.8, 0.8, 0.8)
     GameTooltip:AddLine(data.rank, C.gold.r, C.gold.g, C.gold.b)
 
+    -- Talent spec
+    if BRutus.SpecChecker then
+        local memberKey = BRutus:GetPlayerKey(data.name, data.realm or GetRealmName())
+        local specLabel = BRutus.SpecChecker:GetSpecLabel(memberKey)
+        if specLabel then
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine("Spec: " .. specLabel, cr, cg, cb)
+        end
+    end
+
     if data.zone and data.zone ~= "" then
         GameTooltip:AddLine(" ")
         GameTooltip:AddLine("Zone: " .. data.zone, C.silver.r, C.silver.g, C.silver.b)
