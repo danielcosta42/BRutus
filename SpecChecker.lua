@@ -46,6 +46,29 @@ local function CountTabPoints(tabIndex, isInspect)
 end
 
 ----------------------------------------------------------------------
+-- Collect full talent data for one talent tab.
+-- Returns an array of {name, icon, tier, column, currentRank, maxRank}.
+----------------------------------------------------------------------
+local function CollectTabTalents(tabIndex, isInspect)
+    local talents    = {}
+    local numTalents = GetNumTalents(tabIndex, isInspect)
+    if not numTalents then return talents end
+    for t = 1, numTalents do
+        local tName, tIcon, tier, col, curRank, maxRank =
+            GetTalentInfo(tabIndex, t, isInspect)
+        talents[t] = {
+            name        = tName   or "",
+            icon        = tIcon   or "",
+            tier        = tonumber(tier)    or 0,
+            column      = tonumber(col)     or 0,
+            currentRank = tonumber(curRank) or 0,
+            maxRank     = tonumber(maxRank) or 0,
+        }
+    end
+    return talents
+end
+
+----------------------------------------------------------------------
 -- Collect the local player's own spec from their talent tabs.
 -- Stores result in BRutus.db.members[key].spec and returns it.
 ----------------------------------------------------------------------
@@ -64,6 +87,11 @@ function SpecChecker:CollectOwnSpec()
     end
 
     local spec = self:BuildSpecRecord(points, names)
+    local talentsPerTab = {}
+    for i = 1, numTabs do
+        talentsPerTab[i] = CollectTabTalents(i, false)
+    end
+    spec.talents = talentsPerTab
 
     local key = BRutus:GetPlayerKey(UnitName("player"), GetRealmName())
     if BRutus.db and BRutus.db.members then
@@ -193,6 +221,11 @@ function SpecChecker:OnInspectReady()
     end
 
     local spec = self:BuildSpecRecord(points, names)
+    local talentsPerTab = {}
+    for i = 1, numTabs do
+        talentsPerTab[i] = CollectTabTalents(i, true)
+    end
+    spec.talents = talentsPerTab
 
     if not BRutus.db.members[inspectPending.key] then
         BRutus.db.members[inspectPending.key] = { name = inspectPending.name }

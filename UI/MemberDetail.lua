@@ -209,11 +209,25 @@ function PopulateDetail(frame, data)
         local spec = BRutus.db.members and BRutus.db.members[playerKey] and BRutus.db.members[playerKey].spec
         local cr, cg, cb = BRutus:GetClassColor(data.class)
 
-        -- Talent distribution bar (one segment per tree)
+        -- Talent distribution bar (one segment per tree; clickable to view tree)
         if spec and spec.points and spec.names then
-            local barFrame = CreateFrame("Frame", nil, child)
+            local barFrame = CreateFrame("Button", nil, child)
             barFrame:SetPoint("TOPLEFT", 10, yOff)
             barFrame:SetSize(contentWidth - 20, 20)
+            barFrame:RegisterForClicks("LeftButtonUp")
+            if spec.talents then
+                barFrame:SetScript("OnClick", function()
+                    local freshSpec = BRutus.db.members[playerKey]
+                        and BRutus.db.members[playerKey].spec
+                    BRutus:ShowTalentViewer(freshSpec or spec, data.name, data.class)
+                end)
+                barFrame:SetScript("OnEnter", function(self)
+                    GameTooltip:SetOwner(self, "ANCHOR_TOP")
+                    GameTooltip:SetText("Click to view talent tree", 1, 1, 0.6)
+                    GameTooltip:Show()
+                end)
+                barFrame:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            end
             barFrame:Show()
 
             local total = 0
@@ -1112,4 +1126,263 @@ function CreateAttunementRow(parent, att, yOff, width)
     end
 
     return yOff - ROW_H
+end
+
+----------------------------------------------------------------------
+-- Talent Tree Viewer
+-- A compact floating panel showing a member's talents tab by tab.
+----------------------------------------------------------------------
+local TV_SLOT_SIZE = 38   -- icon cell size (includes border/gap)
+local TV_ICON_SIZE = 34   -- inner texture size
+local TV_COLS      = 4
+local TV_ROWS      = 9    -- max tier rows in TBC talent trees
+local TV_W         = TV_COLS * TV_SLOT_SIZE + 22          -- 174
+local TV_H         = 36 + 26 + 4 + TV_ROWS * TV_SLOT_SIZE + 10  -- 418
+
+local function CreateTalentViewerFrame()
+    local f = UI:CreatePanel(UIParent, "BRutusTalentViewer")
+    f:SetSize(TV_W, TV_H)
+    f:SetPoint("CENTER", 350, 0)
+    f:SetMovable(true)
+    f:EnableMouse(true)
+    f:SetClampedToScreen(true)
+    f:SetFrameStrata("DIALOG")
+    f:SetFrameLevel(30)
+    f:Hide()
+
+    ----------------------------------------------------------------
+    -- Title bar (draggable)
+    ----------------------------------------------------------------
+    local titleBar = CreateFrame("Frame", nil, f)
+    titleBar:SetPoint("TOPLEFT")
+    titleBar:SetPoint("TOPRIGHT")
+    titleBar:SetHeight(36)
+    titleBar:EnableMouse(true)
+    titleBar:RegisterForDrag("LeftButton")
+    titleBar:SetScript("OnDragStart", function() f:StartMoving() end)
+    titleBar:SetScript("OnDragStop",  function() f:StopMovingOrSizing() end)
+
+    local titleBg = titleBar:CreateTexture(nil, "ARTWORK")
+    titleBg:SetTexture("Interface\\Buttons\\WHITE8x8")
+    titleBg:SetAllPoints()
+    titleBg:SetVertexColor(C.headerBg.r, C.headerBg.g, C.headerBg.b, C.headerBg.a)
+
+    local titleText = titleBar:CreateFontString(nil, "OVERLAY")
+    titleText:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
+    titleText:SetPoint("LEFT", 8, 0)
+    titleText:SetPoint("RIGHT", -26, 0)
+    titleText:SetJustifyH("LEFT")
+    titleText:SetTextColor(C.gold.r, C.gold.g, C.gold.b)
+    titleText:SetWordWrap(false)
+    f.titleText = titleText
+
+    local closeBtn = UI:CreateCloseButton(titleBar)
+    closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -4, -4)
+    closeBtn:SetScript("OnClick", function() f:Hide() end)
+
+    local titleLine = f:CreateTexture(nil, "OVERLAY")
+    titleLine:SetTexture("Interface\\Buttons\\WHITE8x8")
+    titleLine:SetPoint("TOPLEFT",  0, -36)
+    titleLine:SetPoint("TOPRIGHT", 0, -36)
+    titleLine:SetHeight(1)
+    titleLine:SetVertexColor(C.accent.r, C.accent.g, C.accent.b, 0.8)
+
+    ----------------------------------------------------------------
+    -- Tree tab buttons (3 trees per class)
+    ----------------------------------------------------------------
+    local tabW = math.floor((TV_W - 8) / 3)
+    local tabs = {}
+    for i = 1, 3 do
+        local tab = CreateFrame("Button", nil, f, "BackdropTemplate")
+        tab:SetSize(tabW - 2, 24)
+        tab:SetPoint("TOPLEFT", 4 + (i - 1) * tabW, -38)
+        tab:SetBackdrop({
+            bgFile   = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Buttons\\WHITE8x8",
+            edgeSize = 1,
+        })
+        tab:SetBackdropColor(C.row2.r, C.row2.g, C.row2.b, 1)
+        tab:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.5)
+
+        local lbl = tab:CreateFontString(nil, "OVERLAY")
+        lbl:SetFont("Fonts\\FRIZQT__.TTF", 7, "OUTLINE")
+        lbl:SetAllPoints()
+        lbl:SetJustifyH("CENTER")
+        lbl:SetTextColor(C.silver.r, C.silver.g, C.silver.b)
+        tab.label = lbl
+
+        local capturedI = i
+        tab:SetScript("OnClick", function()
+            f.currentTab = capturedI
+            f:RefreshGrid()
+        end)
+        tabs[i] = tab
+    end
+    f.tabs = tabs
+
+    ----------------------------------------------------------------
+    -- Icon slots — pre-created grid; repositioned on refresh
+    ----------------------------------------------------------------
+    local gridX = 11
+    local gridY = -66  -- below title bar + tabs + gap
+    local slots = {}
+    for row = 1, TV_ROWS do
+        slots[row] = {}
+        for col = 1, TV_COLS do
+            local slot = CreateFrame("Button", nil, f, "BackdropTemplate")
+            slot:SetSize(TV_ICON_SIZE, TV_ICON_SIZE)
+            slot:SetPoint(
+                "TOPLEFT",
+                gridX + (col - 1) * TV_SLOT_SIZE,
+                gridY - (row - 1) * TV_SLOT_SIZE)
+            slot:SetBackdrop({
+                bgFile   = "Interface\\Buttons\\WHITE8x8",
+                edgeFile = "Interface\\Buttons\\WHITE8x8",
+                edgeSize = 1,
+            })
+            slot:SetBackdropColor(0, 0, 0, 0.7)
+            slot:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.4)
+
+            local icon = slot:CreateTexture(nil, "ARTWORK")
+            icon:SetPoint("TOPLEFT",     2, -2)
+            icon:SetPoint("BOTTOMRIGHT", -2, 2)
+            slot.icon = icon
+
+            local rankText = slot:CreateFontString(nil, "OVERLAY")
+            rankText:SetFont("Fonts\\FRIZQT__.TTF", 7, "OUTLINE")
+            rankText:SetPoint("BOTTOMRIGHT", -1, 2)
+            slot.rankText = rankText
+
+            local dimOverlay = slot:CreateTexture(nil, "OVERLAY")
+            dimOverlay:SetTexture("Interface\\Buttons\\WHITE8x8")
+            dimOverlay:SetAllPoints()
+            dimOverlay:SetVertexColor(0, 0, 0, 0.55)
+            slot.dimOverlay = dimOverlay
+
+            slot:SetScript("OnEnter", function(self)
+                if not self.talentData then return end
+                local td = self.talentData
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:SetText(td.name, 1, 1, 1)
+                if td.currentRank > 0 then
+                    GameTooltip:AddLine(
+                        format("Rank %d / %d", td.currentRank, td.maxRank),
+                        0.9, 0.8, 0.1)
+                else
+                    GameTooltip:AddLine(
+                        format("Not learned  (0/%d)", td.maxRank),
+                        0.5, 0.5, 0.5)
+                end
+                GameTooltip:Show()
+            end)
+            slot:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+            slot:Hide()
+            slots[row][col] = slot
+        end
+    end
+    f.slots = slots
+
+    ----------------------------------------------------------------
+    -- RefreshGrid: fill the grid from the current tab's talent data
+    ----------------------------------------------------------------
+    function f:RefreshGrid()
+        local tab  = self.currentTab or 1
+        local spec = self.spec
+        if not spec then return end
+
+        -- Tab button styles
+        local cr, cg, cb = BRutus:GetClassColor(self.classToken)
+        for i, tabBtn in ipairs(self.tabs) do
+            local pts  = (spec.points and spec.points[i]) or 0
+            local name = (spec.names  and spec.names[i])  or ("Tree " .. i)
+            if #name > 8 then name = name:sub(1, 8) end
+            tabBtn.label:SetText(name .. "\n" .. pts)
+            if i == tab then
+                tabBtn:SetBackdropColor(cr * 0.35, cg * 0.35, cb * 0.35, 1)
+                tabBtn.label:SetTextColor(C.gold.r, C.gold.g, C.gold.b)
+            else
+                tabBtn:SetBackdropColor(C.row2.r, C.row2.g, C.row2.b, 1)
+                tabBtn.label:SetTextColor(C.silver.r, C.silver.g, C.silver.b)
+            end
+        end
+
+        -- Clear all slots
+        for row = 1, TV_ROWS do
+            for col = 1, TV_COLS do
+                local slot = self.slots[row][col]
+                slot.talentData = nil
+                slot.icon:SetTexture("")
+                slot.rankText:SetText("")
+                slot.dimOverlay:Show()
+                slot:Hide()
+            end
+        end
+
+        -- Populate talents for the active tab
+        local tabTalents = spec.talents and spec.talents[tab]
+        if not tabTalents then return end
+
+        for _, td in ipairs(tabTalents) do
+            local row = tonumber(td.tier)   or 0
+            local col = tonumber(td.column) or 0
+            if row >= 1 and row <= TV_ROWS and col >= 1 and col <= TV_COLS then
+                local slot = self.slots[row][col]
+                slot.talentData = td
+                slot.icon:SetTexture(
+                    (td.icon and td.icon ~= "") and td.icon
+                    or "Interface\\Icons\\INV_Misc_QuestionMark")
+                if td.currentRank > 0 then
+                    slot.icon:SetDesaturated(false)
+                    slot.icon:SetAlpha(1.0)
+                    slot.dimOverlay:Hide()
+                    slot:SetBackdropBorderColor(cr * 0.8, cg * 0.8, cb * 0.8, 0.9)
+                    if td.currentRank >= td.maxRank then
+                        slot.rankText:SetTextColor(0.2, 1.0, 0.2)
+                    else
+                        slot.rankText:SetTextColor(1.0, 0.85, 0.0)
+                    end
+                    slot.rankText:SetText(td.currentRank .. "/" .. td.maxRank)
+                else
+                    slot.icon:SetDesaturated(true)
+                    slot.icon:SetAlpha(0.4)
+                    slot.dimOverlay:Show()
+                    slot:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.3)
+                    slot.rankText:SetTextColor(0.35, 0.35, 0.35)
+                    slot.rankText:SetText("0/" .. td.maxRank)
+                end
+                slot:Show()
+            end
+        end
+    end
+
+    table.insert(UISpecialFrames, "BRutusTalentViewer")
+    return f
+end
+
+----------------------------------------------------------------------
+-- BRutus:ShowTalentViewer(spec, playerName, classToken)
+-- Opens the talent tree viewer for the given spec record.
+----------------------------------------------------------------------
+function BRutus:ShowTalentViewer(spec, playerName, classToken)
+    if not spec or not spec.talents then
+        BRutus:Print("|cffFF4444No talent data available for this player.|r")
+        return
+    end
+
+    if not self.TalentViewerFrame then
+        self.TalentViewerFrame = CreateTalentViewerFrame()
+    end
+    local f = self.TalentViewerFrame
+    f.spec       = spec
+    f.classToken = classToken
+
+    local shortName = (playerName or "?"):match("^([^-]+)") or playerName
+    local specName  = spec.tree or "Unknown"
+    f.titleText:SetText(shortName .. "  —  " .. specName)
+
+    f.currentTab = spec.treeIndex or 1
+    f:RefreshGrid()
+    f:Show()
+    f:Raise()
 end
