@@ -207,7 +207,6 @@ function PopulateDetail(frame, data)
 
     if specLabel then
         local spec = BRutus.db.members and BRutus.db.members[playerKey] and BRutus.db.members[playerKey].spec
-        local cr, cg, cb = BRutus:GetClassColor(data.class)
 
         -- Talent distribution bar (one segment per tree; clickable to view tree)
         if spec and spec.points and spec.names then
@@ -397,7 +396,6 @@ function PopulateDetail(frame, data)
     -- Section: Attunements (account-wide propagation from linked chars)
     ----------------------------------------------------------------
     yOff = yOff - 10
-    local playerKey = BRutus:GetPlayerKey(data.name, data.realm or GetRealmName())
     yOff = CreateSectionHeader(child, "RAID ATTUNEMENTS", yOff, contentWidth)
     yOff = yOff - 5
 
