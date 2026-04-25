@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.21.0] - 2026-04-25
+
+### Added
+- add additional WoW API read globals for talent inspection functionality
+- implement talent data collection and viewer for player specs
+- add SpecChecker module to collect and display talent spec data
+
+### Changed
+- remove unused variables in PopulateDetail function for improved clarity
+
+
 ## [1.20.0] - 2026-04-24
 
 ### Added
