@@ -260,7 +260,7 @@ RegisterProf("Leatherworking", true, {
 })
 RegisterProf("Mining", true, {
     "Mining", "Mineração", "Minería", "Minage", "Bergbau",
-})
+}, true)
 RegisterProf("Skinning", true, {
     "Skinning", "Esfolamento", "Desuello", "Dépeçage", "Kürschnerei",
 }, true)
