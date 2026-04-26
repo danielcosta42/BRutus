@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.34.0] - 2026-04-26
+
+### Added
+- add support section to README with donation link
+- update publish workflow to include Wago and clarify package publishing
+- optimize memory usage by reusing member list table in roster frame
+
+
 ## [1.33.0] - 2026-04-26
 
 ### Added
