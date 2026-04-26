@@ -226,7 +226,9 @@ function BRutus.CreateRosterFrame()
     -- Create tabs
     CreateTab("roster", "Roster", false)
     CreateTab("recipes", "Recipes", false)
-    CreateTab("wishlist", "Lista de Desejos", false)
+    if BRutus:IsOfficer() then
+        CreateTab("wishlist", "Lista de Desejos", false)
+    end
     CreateTab("raids", "Raids", false)
     CreateTab("loot", "Loot", false)
     CreateTab("trials", "Trials", true)
@@ -497,10 +499,12 @@ function BRutus.CreateRosterFrame()
     local helpText = UI:CreateText(bottomBar, "/brutus scan  |  /brutus sync  |  /brutus wish", 9, 0.4, 0.4, 0.5)
     helpText:SetPoint("LEFT", 12, 0)
 
-    -- "Minha Wishlist" quick-access button
-    local wishBtn = UI:CreateButton(bottomBar, "Minha Wishlist", 120, 22)
-    wishBtn:SetPoint("LEFT", helpText, "RIGHT", 16, 0)
-    wishBtn:SetScript("OnClick", function() BRutus:ShowWishlistFrame() end)
+    -- "Minha Wishlist" quick-access button (officer-only while in testing)
+    if BRutus:IsOfficer() then
+        local wishBtn = UI:CreateButton(bottomBar, "Minha Wishlist", 120, 22)
+        wishBtn:SetPoint("LEFT", helpText, "RIGHT", 16, 0)
+        wishBtn:SetScript("OnClick", function() BRutus:ShowWishlistFrame() end)
+    end
 
     -- Guild Invite (visible only if player can invite)
     local inviteBox = CreateFrame("EditBox", nil, bottomBar, "BackdropTemplate")

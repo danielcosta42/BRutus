@@ -357,12 +357,14 @@ function BRutus:OnEnterWorld()
                 BRutus.CommSystem:BroadcastMyData()
             end
         end)
-        -- Broadcast our wishlist so guildies can see our priorities
-        C_Timer.After(5, function()
-            if BRutus.Wishlist then
-                BRutus.Wishlist:BroadcastMyWishlist()
-            end
-        end)
+        -- Broadcast our wishlist so guildies can see our priorities (officer-only while in testing)
+        if BRutus:IsOfficer() then
+            C_Timer.After(5, function()
+                if BRutus.Wishlist then
+                    BRutus.Wishlist:BroadcastMyWishlist()
+                end
+            end)
+        end
         -- Check profession freshness after data is collected
         C_Timer.After(4, function()
             BRutus:CheckProfessionFreshness()
@@ -461,6 +463,10 @@ SlashCmdList["BRUTUS"] = function(msg)
             end
         end
     elseif msg:match("^wish") then
+        if not BRutus:IsOfficer() then
+            BRutus:Print("|cffFF4444Lista de desejos disponível apenas para officers no momento.|r")
+            return
+        end
         local rest = strtrim(msg:gsub("^wish%s*", ""))
         if rest == "" or rest == "list" then
             -- Show wishlist frame
