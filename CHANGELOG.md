@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.28.0] - 2026-04-26
+
+### Added
+- enhance session merging by deduplicating encounters and normalizing snapshot data
+- add guild-only filter to recent sessions retrieval in RaidTracker
+- enhance wishlist functionality with item delivery tracking and improved UI display
+- implement session deletion tracking and enhance loot award handling
+
+### Changed
+- simplify conditionals for guild-only session filtering and improve variable naming in session merging
+- update variable naming for clarity and remove unused attendance export button
+
+
 ## [1.27.0] - 2026-04-26
 
 ### Added
