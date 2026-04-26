@@ -124,12 +124,14 @@ end
 ----------------------------------------------------------------------
 -- MODULE STATE
 ----------------------------------------------------------------------
-local _cdState     = {}   -- [playerName][cdKey] = { usedAt, duration }
-local _raidMembers = {}   -- [name] = classFile  (e.g. "WARRIOR")
-local _hudFrame    = nil
-local _consPopup   = nil
-local _collapsed   = false
-local _lastTick    = 0
+local _cdState           = {}   -- [playerName][cdKey] = { usedAt, duration }
+local _raidMembers       = {}   -- [name] = classFile  (e.g. "WARRIOR")
+local _hudFrame          = nil
+local _consPopup         = nil
+local _collapsed         = false
+local _lastTick          = 0
+local _hudManuallyClosed  = false
+local _consManuallyClosed = false
 
 ----------------------------------------------------------------------
 -- LAYOUT CONSTANTS
@@ -410,7 +412,10 @@ function BRutus:CreateRaidHUD()
     closeTxt:SetTextColor(0.85, 0.20, 0.20)
     closeTxt:SetText("×")
 
-    closeBtn:SetScript("OnClick", function() f:Hide() end)
+    closeBtn:SetScript("OnClick", function()
+        _hudManuallyClosed = true
+        f:Hide()
+    end)
 
     ----------------------------------------------------------------
     -- Body frame (holds CD rows)
@@ -457,14 +462,18 @@ function BRutus:UpdateRaidHUDVisibility()
         or BRutus.db.settings.modules.raidHUD ~= false
     local shouldShow = moduleEnabled and IsInRaid() and IsLeaderOrAssist()
     if shouldShow then
-        if not _hudFrame:IsShown() then
+        if not _hudFrame:IsShown() and not _hudManuallyClosed then
             _hudFrame:Show()
         end
         if not _collapsed then
             BuildHUDRows(_hudFrame)
         end
     else
+        -- Reset dismissed flags when leaving raid so windows reappear on next raid
+        _hudManuallyClosed  = false
+        _consManuallyClosed = false
         _hudFrame:Hide()
+        if _consPopup then _consPopup:Hide() end
     end
 end
 
@@ -478,6 +487,9 @@ _evtFrame:RegisterEvent("RAID_ROSTER_UPDATE")
 
 _evtFrame:SetScript("OnEvent", function(_, event)
     if event == "PLAYER_ENTERING_WORLD" then
+        -- Reset dismissed flags on login/reload so windows show fresh
+        _hudManuallyClosed  = false
+        _consManuallyClosed = false
         -- Wait for BRutus.db to be ready (set in ADDON_LOADED)
         C_Timer.After(2, function()
             if BRutus.db then
@@ -667,6 +679,7 @@ local function BuildConsPopup(f)
 end
 
 function BRutus:ShowConsumablePopup()
+    if _consManuallyClosed then return end
     local CC = BRutus.ConsumableChecker
     if CC then CC:CheckRaid() end
 
@@ -718,7 +731,10 @@ function BRutus:ShowConsumablePopup()
     hCloseTxt:SetJustifyH("CENTER")
     hCloseTxt:SetTextColor(0.85, 0.20, 0.20)
     hCloseTxt:SetText("×")
-    hClose:SetScript("OnClick", function() f:Hide() end)
+    hClose:SetScript("OnClick", function()
+        _consManuallyClosed = true
+        f:Hide()
+    end)
 
     -- Status text
     f.statusText = UI:CreateText(f, "No scan yet", 10, C.silver.r, C.silver.g, C.silver.b)
