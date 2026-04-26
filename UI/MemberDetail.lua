@@ -431,8 +431,6 @@ function PopulateDetail(frame, data)
         yOff = CreateSectionHeader(child, wishHeader, yOff, contentWidth)
         yOff = yOff - 5
 
-        local wColor = BRutus.Wishlist and BRutus.Wishlist.TypeColors.wishlist or { r=0.3, g=0.7, b=1.0 }
-
         for _, item in ipairs(wishData.wishlist) do
             local qColor = C.white
             if BRutus.Wishlist and BRutus.QualityColors then

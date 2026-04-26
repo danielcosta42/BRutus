@@ -877,14 +877,10 @@ end
 ----------------------------------------------------------------------
 function RaidTracker:MigrateAttendanceIfNeeded()
     local att = BRutus.db.raidTracker and BRutus.db.raidTracker.attendance or {}
-    for _, v in pairs(att) do
-        if type(v) == "table" and (v.raids ~= nil or v.lastRaid ~= nil or v.raids25 ~= nil) then
-            -- Old flat format detected
-            BRutus:Print("|cffFFAA00BRutus: Detectada attendance no formato antigo. Reconstruindo por grupo…|r")
-            self:RebuildAttendanceFromSessions()
-            return
-        end
-        -- Only need to inspect one entry; if it's a subtable (new format) we're good
-        break
+    -- Inspect the first entry only to detect the old flat format
+    local _, v = next(att)
+    if type(v) == "table" and (v.raids ~= nil or v.lastRaid ~= nil or v.raids25 ~= nil) then
+        BRutus:Print("|cffFFAA00BRutus: Detectada attendance no formato antigo. Reconstruindo por grupo…|r")
+        self:RebuildAttendanceFromSessions()
     end
 end
