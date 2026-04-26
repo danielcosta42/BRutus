@@ -9,6 +9,8 @@
 ## X-Category: Guild
 ## X-Website: https://github.com/danielcosta42/BRutus
 ## X-Curse-Project-ID: 1517832
+## X-Wago-ID: b6XeDxKp
+
 
 # Libraries
 Libs\LibStub.lua
