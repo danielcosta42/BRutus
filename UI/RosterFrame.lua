@@ -1407,6 +1407,8 @@ function BRutus:CreateTMBPanel(parent, _mainFrame)
     hWish:SetPoint("LEFT", 370, 0)
     local hRecv = UI:CreateHeaderText(colHeader, "Received", 10)
     hRecv:SetPoint("LEFT", 460, 0)
+    local hAtt = UI:CreateHeaderText(colHeader, "ATT%", 10)
+    hAtt:SetPoint("LEFT", 546, 0)
 
     ----------------------------------------------------------------
     -- Scrollable character list
@@ -1631,6 +1633,30 @@ function BRutus:CreateTMBPanel(parent, _mainFrame)
                 recvCount:SetTextColor(0.3, 0.3, 0.3)
                 recvCount:SetText("-")
             end
+
+            -- ATT% (25-man attendance)
+            local attStr = "-"
+            local attR, attG, attB = 0.35, 0.35, 0.35
+            if BRutus.RaidTracker then
+                local pKey = BRutus:GetPlayerKey(charData.name, GetRealmName())
+                local attVal = BRutus.RaidTracker:GetAttendance25ManPercent(pKey) or 0
+                if attVal > 0 then
+                    attStr = attVal .. "%"
+                    if attVal >= 60 then
+                        attR, attG, attB = 0.3, 1.0, 0.3
+                    elseif attVal >= 40 then
+                        attR, attG, attB = 1.0, 1.0, 0.3
+                    else
+                        attR, attG, attB = 1.0, 0.3, 0.3
+                    end
+                end
+            end
+            local attPct = charRow:CreateFontString(nil, "OVERLAY")
+            attPct:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
+            attPct:SetPoint("LEFT", 546, 0)
+            attPct:SetWidth(50)
+            attPct:SetTextColor(attR, attG, attB)
+            attPct:SetText(attStr)
 
             -- Hover
             charRow:SetScript("OnEnter", function(self)

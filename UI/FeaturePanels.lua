@@ -99,6 +99,7 @@ end
 
 -- Session expand state (persists while panel is shown)
 local _sessionExpanded = {}
+local _groupExpanded   = {}
 
 function BRutus:RefreshRaidsPanel(sessionContent, attContent, statusText)
     if not BRutus.RaidTracker then return end
@@ -111,215 +112,290 @@ function BRutus:RefreshRaidsPanel(sessionContent, attContent, statusText)
     local total25   = BRutus.RaidTracker:GetTotal25ManSessions()
     local trackStr  = BRutus.RaidTracker.trackingActive
                       and "|cff00ff00Tracking|r" or "|cff888888Idle|r"
-    statusText:SetText(totalAll .. " sessions (" .. total25 .. " 25-man)  |  " .. trackStr)
+    statusText:SetText(totalAll .. " lockouts (" .. total25 .. " 25-man)  |  " .. trackStr)
 
     ----------------------------------------------------------------
-    -- Sessions list (filtered, most recent 20)
+    -- Sessions grouped by instance + TBC reset week (Tuesday reset)
     ----------------------------------------------------------------
-    local sessions = BRutus.RaidTracker:GetRecentSessions(50, _raidFilter25)
-    local yOff = 0
+    local sessions = BRutus.RaidTracker:GetRecentSessions(200, _raidFilter25)
 
-    for idx, s in ipairs(sessions) do
-        local sd      = s.data
-        local is25    = BRutus.RaidTracker:Is25Man(sd.instanceID)
-        local isExp   = _sessionExpanded[s.id]
-        local rowH    = 22
+    -- TBC weekly reset epoch: 2006-01-03 00:00 UTC (a known Tuesday)
+    local TUESDAY_EPOCH = 1136246400
+    local WEEK_SECS     = 7 * 86400
 
-        -- Main session row
-        local row = CreateFrame("Button", nil, sessionContent, "BackdropTemplate")
-        row:SetSize(sessionContent:GetWidth() - 10, rowH)
-        row:SetPoint("TOPLEFT", 0, -yOff)
-        row:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
-        local bg = (idx % 2 == 1) and C.row1 or C.row2
-        row:SetBackdropColor(bg.r, bg.g, bg.b, bg.a)
+    -- Build groups keyed by "instanceID_weekNum"
+    local groups     = {}
+    local groupOrder = {}
 
-        -- Expand arrow
-        local arrow = UI:CreateText(row, isExp and "▼" or "▶", 9, C.accent.r, C.accent.g, C.accent.b)
-        arrow:SetPoint("LEFT", 4, 0)
+    for _, s in ipairs(sessions) do
+        local sd        = s.data
+        local startTime = sd.startTime or s.id
+        local weekNum   = math.floor((startTime - TUESDAY_EPOCH) / WEEK_SECS)
+        local groupKey  = (sd.instanceID or 0) .. "_" .. weekNum
 
-        -- Raid name
-        local nameClr = is25 and C.gold or C.silver
-        local nameText = UI:CreateText(row, sd.name or "Unknown", 10, nameClr.r, nameClr.g, nameClr.b)
-        nameText:SetPoint("LEFT", 18, 0)
-
-        -- 25-man badge
-        if is25 then
-            local badge = UI:CreateText(row, "[25]", 9, C.accent.r, C.accent.g, C.accent.b)
-            badge:SetPoint("LEFT", 165, 0)
+        if not groups[groupKey] then
+            local wStart = TUESDAY_EPOCH + weekNum * WEEK_SECS
+            groups[groupKey] = {
+                key        = groupKey,
+                instanceID = sd.instanceID,
+                name       = sd.name or "Unknown",
+                weekNum    = weekNum,
+                weekStart  = wStart,
+                sessions   = {},
+                allPlayers = {},
+                kills      = 0,
+                wipes      = 0,
+            }
+            table.insert(groupOrder, groupKey)
         end
 
-        -- PUG badge
-        if sd.isGuildRaid == false then
-            local pugBadge = UI:CreateText(row, "[PUG]", 9, 0.6, 0.6, 0.6)
-            pugBadge:SetPoint("LEFT", is25 and 195 or 165, 0)
-        end
+        local g = groups[groupKey]
+        table.insert(g.sessions, s)
 
-        -- Date
-        local dateStr  = date("%m/%d %H:%M", sd.startTime or 0)
-        local dateText = UI:CreateText(row, dateStr, 10, C.silver.r, C.silver.g, C.silver.b)
-        dateText:SetPoint("LEFT", 210, 0)
-
-        -- Duration
-        local dur = sd.duration or (sd.endTime and sd.startTime and (sd.endTime - sd.startTime))
-        if dur then
-            local durStr = format("%dh%02dm", floor(dur/3600), floor((dur%3600)/60))
-            local durText = UI:CreateText(row, durStr, 9, C.silver.r, C.silver.g, C.silver.b)
-            durText:SetPoint("LEFT", 310, 0)
-        end
-
-        -- Player count
-        local pCount    = BRutus.RaidTracker:CountTable(sd.players or {})
-        local countText = UI:CreateText(row, pCount .. " players", 10, C.white.r, C.white.g, C.white.b)
-        countText:SetPoint("LEFT", 370, 0)
-
-        -- Boss count with kills/wipes breakdown
-        local kills, wipes = 0, 0
-        if sd.encounters then
-            for _, enc in ipairs(sd.encounters) do
-                if enc.success then kills = kills + 1
-                else wipes = wipes + 1 end
-            end
-        end
-        local encStr = kills .. " kills"
-        if wipes > 0 then encStr = encStr .. " / " .. wipes .. " wipes" end
-        local encClr = kills > 0 and C.green or C.silver
-        local encText  = UI:CreateText(row, encStr, 10, encClr.r, encClr.g, encClr.b)
-        encText:SetPoint("LEFT", 470, 0)
-
-        -- Delete button (officer only)
-        if BRutus:IsOfficer() then
-            local delBtn = UI:CreateButton(row, "X", 20, 16)
-            delBtn:SetPoint("RIGHT", -4, 0)
-            delBtn:SetScript("OnClick", function()
-                BRutus.RaidTracker:DeleteSession(s.id)
-                _sessionExpanded[s.id] = nil
-                BRutus:RefreshRaidsPanel(sessionContent, attContent, statusText)
-            end)
-        end
-
-        -- Toggle expand on click
-        local capturedID = s.id
-        row:SetScript("OnClick", function()
-            _sessionExpanded[capturedID] = not _sessionExpanded[capturedID]
-            BRutus:RefreshRaidsPanel(sessionContent, attContent, statusText)
-        end)
-        row:SetScript("OnEnter", function(self)
-            self:SetBackdropColor(C.rowHover.r, C.rowHover.g, C.rowHover.b, C.rowHover.a)
-        end)
-        row:SetScript("OnLeave", function(self)
-            self:SetBackdropColor(bg.r, bg.g, bg.b, bg.a)
-        end)
-
-        yOff = yOff + rowH + 2
-
-        -- Expanded: per-player breakdown
-        if isExp then
-            local snapshots = sd.snapshots or {}
-            local firstSnap = snapshots[1]
-            local lastSnap  = snapshots[#snapshots]
-
-            -- Build player list with penalty info
-            local playerList = {}
-            for key in pairs(sd.players or {}) do
-                local shortName = key:match("^([^-]+)") or key
-                local memberData = BRutus.db.members and BRutus.db.members[key]
-                local class = memberData and memberData.class or nil
-
-                local wasLate = firstSnap and firstSnap.members and not firstSnap.members[key]
-                local leftEarly = lastSnap and lastSnap.members and not lastSnap.members[key]
-
-                -- Consumable check across snapshots
-                local consumeChecks, consumeHits = 0, 0
-                for _, snap in ipairs(snapshots) do
-                    if snap.members and snap.members[key] then
-                        consumeChecks = consumeChecks + 1
-                        if snap.members[key].hasConsumes then
-                            consumeHits = consumeHits + 1
-                        end
-                    end
-                end
-                local noConsumes = consumeChecks > 0 and (consumeHits / consumeChecks) < 0.5
-
-                -- Score
-                local score = 100
-                if wasLate    then score = score - (BRutus.RaidTracker.PENALTIES.LATE or 10) end
-                if leftEarly  then score = score - (BRutus.RaidTracker.PENALTIES.LEFT_EARLY or 10) end
-                if noConsumes then score = score - (BRutus.RaidTracker.PENALTIES.NO_CONSUMES or 10) end
-                score = math.max(0, math.min(100, score))
-
-                table.insert(playerList, {
-                    key = key, name = shortName, class = class,
-                    score = score, wasLate = wasLate, leftEarly = leftEarly,
-                    noConsumes = noConsumes, consumeHits = consumeHits, consumeChecks = consumeChecks,
-                })
-            end
-
-            table.sort(playerList, function(a, b)
-                if a.score ~= b.score then return a.score > b.score end
-                local ca = a.class or "ZZZZ"; local cb2 = b.class or "ZZZZ"
-                if ca ~= cb2 then return ca < cb2 end
-                return a.name < b.name
-            end)
-
-            -- Column headers for expanded section
-            local hdrFrame = CreateFrame("Frame", nil, sessionContent, "BackdropTemplate")
-            hdrFrame:SetSize(sessionContent:GetWidth() - 30, 16)
-            hdrFrame:SetPoint("TOPLEFT", 20, -yOff)
-            hdrFrame:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
-            hdrFrame:SetBackdropColor(0.04, 0.04, 0.08, 1)
-
-            local function Hdr(txt, x)
-                local t = UI:CreateText(hdrFrame, txt, 8, C.accent.r, C.accent.g, C.accent.b)
-                t:SetPoint("LEFT", x, 0)
-            end
-            Hdr("PLAYER", 6); Hdr("SCORE", 120); Hdr("LATE", 170); Hdr("LEFT EARLY", 210); Hdr("NO CONS", 290)
-            yOff = yOff + 18
-
-            for pIdx, p in ipairs(playerList) do
-                local pRow = CreateFrame("Frame", nil, sessionContent, "BackdropTemplate")
-                pRow:SetSize(sessionContent:GetWidth() - 30, 18)
-                pRow:SetPoint("TOPLEFT", 20, -yOff)
-                pRow:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
-                local pbg = (pIdx % 2 == 1) and { r=0.05, g=0.04, b=0.09 } or { r=0.07, g=0.06, b=0.12 }
-                pRow:SetBackdropColor(pbg.r, pbg.g, pbg.b, 0.9)
-
-                -- Class-colored name
-                local cr, cg, cb = BRutus:GetClassColor(p.class)
-                local nameT = UI:CreateText(pRow, p.name, 9, cr, cg, cb)
-                nameT:SetPoint("LEFT", 6, 0)
-                nameT:SetWidth(110)
-
-                -- Score (colored)
-                local sr, sg, sb = C.green.r, C.green.g, C.green.b
-                if p.score < 75 then sr, sg, sb = C.gold.r, C.gold.g, C.gold.b end
-                if p.score < 50 then sr, sg, sb = C.red.r,  C.red.g,  C.red.b  end
-                local scoreT = UI:CreateText(pRow, p.score .. "%", 9, sr, sg, sb)
-                scoreT:SetPoint("LEFT", 120, 0)
-
-                -- Penalty flags
-                local function Flag(x, val, redTxt, greenTxt)
-                    local r2, g2, b2 = val and C.red.r or C.green.r, val and C.red.g or C.green.g, val and C.red.b or C.green.b
-                    local t = UI:CreateText(pRow, val and redTxt or greenTxt, 8, r2, g2, b2)
-                    t:SetPoint("LEFT", x, 0)
-                end
-                Flag(170, p.wasLate,    "LATE",    "OK")
-                Flag(210, p.leftEarly,  "LEFT",    "OK")
-
-                -- Consumables: show ratio
-                local consStr = p.consumeChecks > 0
-                    and format("%d/%d", p.consumeHits, p.consumeChecks)
-                    or "-"
-                local cr2, cg2, cb2 = (not p.noConsumes) and C.green.r or C.red.r,
-                                       (not p.noConsumes) and C.green.g or C.red.g,
-                                       (not p.noConsumes) and C.green.b or C.red.b
-                local consT = UI:CreateText(pRow, consStr, 8, cr2, cg2, cb2)
-                consT:SetPoint("LEFT", 290, 0)
-
-                yOff = yOff + 20
-            end
-            yOff = yOff + 6
+        for k in pairs(sd.players or {}) do g.allPlayers[k] = true end
+        for _, enc in ipairs(sd.encounters or {}) do
+            if enc.success then g.kills = g.kills + 1
+            else                g.wipes = g.wipes + 1 end
         end
     end
+
+    -- Sort groups: most recent week first; within same week, raid name A-Z
+    table.sort(groupOrder, function(a, b)
+        local ga, gb = groups[a], groups[b]
+        if ga.weekNum ~= gb.weekNum then return ga.weekNum > gb.weekNum end
+        return ga.name < gb.name
+    end)
+
+    local yOff = 0
+
+    for _, groupKey in ipairs(groupOrder) do
+        local g          = groups[groupKey]
+        local isGroupExp = _groupExpanded[groupKey]
+        local is25       = BRutus.RaidTracker:Is25Man(g.instanceID)
+        local gRowH      = 26
+
+        -- Count unique players
+        local uPlayers = 0
+        for _ in pairs(g.allPlayers) do uPlayers = uPlayers + 1 end
+
+        -- Group header row
+        local gRow = CreateFrame("Button", nil, sessionContent, "BackdropTemplate")
+        gRow:SetSize(sessionContent:GetWidth() - 10, gRowH)
+        gRow:SetPoint("TOPLEFT", 0, -yOff)
+        gRow:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
+        gRow:SetBackdropColor(C.headerBg.r, C.headerBg.g, C.headerBg.b, C.headerBg.a)
+
+        -- Expand arrow
+        UI:CreateText(gRow, isGroupExp and "▼" or "▶", 9, C.accent.r, C.accent.g, C.accent.b)
+            :SetPoint("LEFT", 4, 0)
+
+        -- Raid name (gold for 25-man, silver for 10-man)
+        local nameClr = is25 and C.gold or C.silver
+        UI:CreateText(gRow, g.name, 11, nameClr.r, nameClr.g, nameClr.b)
+            :SetPoint("LEFT", 18, 0)
+
+        -- Week range label  e.g.  "22/04 – 28/04"
+        local weekLabel = date("%d/%m", g.weekStart) .. " – " .. date("%d/%m", g.weekStart + 6 * 86400)
+        UI:CreateText(gRow, weekLabel, 10, C.silver.r, C.silver.g, C.silver.b)
+            :SetPoint("LEFT", 170, 0)
+
+        -- Session count
+        UI:CreateText(gRow, #g.sessions .. " sess.", 9, C.accentDim.r, C.accentDim.g, C.accentDim.b)
+            :SetPoint("LEFT", 280, 0)
+
+        -- Unique player count
+        UI:CreateText(gRow, uPlayers .. " players", 9, C.white.r, C.white.g, C.white.b)
+            :SetPoint("LEFT", 340, 0)
+
+        -- Kills / wipes summary
+        local encStr = g.kills .. " kills"
+        if g.wipes > 0 then encStr = encStr .. " / " .. g.wipes .. " wipes" end
+        local encClr = g.kills > 0 and C.green or C.silver
+        UI:CreateText(gRow, encStr, 9, encClr.r, encClr.g, encClr.b)
+            :SetPoint("LEFT", 420, 0)
+
+        local capturedGKey = groupKey
+        gRow:SetScript("OnClick", function()
+            _groupExpanded[capturedGKey] = not _groupExpanded[capturedGKey]
+            BRutus:RefreshRaidsPanel(sessionContent, attContent, statusText)
+        end)
+        gRow:SetScript("OnEnter", function(self)
+            self:SetBackdropColor(C.rowHover.r, C.rowHover.g, C.rowHover.b, C.rowHover.a)
+        end)
+        gRow:SetScript("OnLeave", function(self)
+            self:SetBackdropColor(C.headerBg.r, C.headerBg.g, C.headerBg.b, C.headerBg.a)
+        end)
+
+        yOff = yOff + gRowH + 2
+
+        -- If expanded, show individual sessions inside this group (indented)
+        if isGroupExp then
+            for idx, s in ipairs(g.sessions) do
+                local sd    = s.data
+                local isExp = _sessionExpanded[s.id]
+                local rowH  = 22
+
+                local row = CreateFrame("Button", nil, sessionContent, "BackdropTemplate")
+                row:SetSize(sessionContent:GetWidth() - 30, rowH)
+                row:SetPoint("TOPLEFT", 20, -yOff)
+                row:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
+                local bg = (idx % 2 == 1) and C.row1 or C.row2
+                row:SetBackdropColor(bg.r, bg.g, bg.b, bg.a)
+
+                -- Expand arrow
+                UI:CreateText(row, isExp and "▼" or "▶", 8, C.accent.r, C.accent.g, C.accent.b)
+                    :SetPoint("LEFT", 4, 0)
+
+                -- Date + time
+                local dateStr = date("%a %d/%m  %H:%M", sd.startTime or 0)
+                UI:CreateText(row, dateStr, 9, C.silver.r, C.silver.g, C.silver.b)
+                    :SetPoint("LEFT", 16, 0)
+
+                -- Duration
+                local dur = sd.duration or (sd.endTime and sd.startTime and (sd.endTime - sd.startTime))
+                if dur then
+                    local durStr = format("%dh%02dm", floor(dur / 3600), floor((dur % 3600) / 60))
+                    UI:CreateText(row, durStr, 9, C.silver.r, C.silver.g, C.silver.b)
+                        :SetPoint("LEFT", 165, 0)
+                end
+
+                -- Player count
+                local pCount = BRutus.RaidTracker:CountTable(sd.players or {})
+                UI:CreateText(row, pCount .. " players", 9, C.white.r, C.white.g, C.white.b)
+                    :SetPoint("LEFT", 215, 0)
+
+                -- Boss kills / wipes
+                local sk, sw = 0, 0
+                for _, enc in ipairs(sd.encounters or {}) do
+                    if enc.success then sk = sk + 1 else sw = sw + 1 end
+                end
+                local sEncStr = sk .. " kills"
+                if sw > 0 then sEncStr = sEncStr .. " / " .. sw .. " wipes" end
+                local sEncClr = sk > 0 and C.green or C.silver
+                UI:CreateText(row, sEncStr, 9, sEncClr.r, sEncClr.g, sEncClr.b)
+                    :SetPoint("LEFT", 300, 0)
+
+                -- PUG badge
+                if sd.isGuildRaid == false then
+                    UI:CreateText(row, "[PUG]", 8, 0.6, 0.6, 0.6):SetPoint("LEFT", 400, 0)
+                end
+
+                -- Delete button (officer only)
+                if BRutus:IsOfficer() then
+                    local delBtn = UI:CreateButton(row, "X", 20, 16)
+                    delBtn:SetPoint("RIGHT", -2, 0)
+                    local capturedSID = s.id
+                    delBtn:SetScript("OnClick", function()
+                        BRutus.RaidTracker:DeleteSession(capturedSID)
+                        _sessionExpanded[capturedSID] = nil
+                        BRutus:RefreshRaidsPanel(sessionContent, attContent, statusText)
+                    end)
+                end
+
+                local capturedID = s.id
+                row:SetScript("OnClick", function()
+                    _sessionExpanded[capturedID] = not _sessionExpanded[capturedID]
+                    BRutus:RefreshRaidsPanel(sessionContent, attContent, statusText)
+                end)
+                row:SetScript("OnEnter", function(self)
+                    self:SetBackdropColor(C.rowHover.r, C.rowHover.g, C.rowHover.b, C.rowHover.a)
+                end)
+                row:SetScript("OnLeave", function(self)
+                    self:SetBackdropColor(bg.r, bg.g, bg.b, bg.a)
+                end)
+
+                yOff = yOff + rowH + 2
+
+                -- Expanded: per-player breakdown (same as before)
+                if isExp then
+                    local snapshots = sd.snapshots or {}
+                    local firstSnap = snapshots[1]
+                    local lastSnap  = snapshots[#snapshots]
+
+                    local playerList = {}
+                    for key in pairs(sd.players or {}) do
+                        local shortName  = key:match("^([^-]+)") or key
+                        local memberData = BRutus.db.members and BRutus.db.members[key]
+                        local class      = memberData and memberData.class or nil
+
+                        local wasLate   = firstSnap and firstSnap.members and not firstSnap.members[key]
+                        local leftEarly = lastSnap  and lastSnap.members  and not lastSnap.members[key]
+
+                        local consumeChecks, consumeHits = 0, 0
+                        for _, snap in ipairs(snapshots) do
+                            if snap.members and snap.members[key] then
+                                consumeChecks = consumeChecks + 1
+                                if snap.members[key].hasConsumes then consumeHits = consumeHits + 1 end
+                            end
+                        end
+                        local noConsumes = consumeChecks > 0 and (consumeHits / consumeChecks) < 0.5
+
+                        local score = 100
+                        if wasLate    then score = score - (BRutus.RaidTracker.PENALTIES.LATE       or 10) end
+                        if leftEarly  then score = score - (BRutus.RaidTracker.PENALTIES.LEFT_EARLY or 10) end
+                        if noConsumes then score = score - (BRutus.RaidTracker.PENALTIES.NO_CONSUMES or 10) end
+                        score = math.max(0, math.min(100, score))
+
+                        table.insert(playerList, {
+                            key = key, name = shortName, class = class,
+                            score = score, wasLate = wasLate, leftEarly = leftEarly,
+                            noConsumes = noConsumes, consumeHits = consumeHits, consumeChecks = consumeChecks,
+                        })
+                    end
+
+                    table.sort(playerList, function(a, b)
+                        if a.score ~= b.score then return a.score > b.score end
+                        local ca = a.class or "ZZZZ"; local cb2 = b.class or "ZZZZ"
+                        if ca ~= cb2 then return ca < cb2 end
+                        return a.name < b.name
+                    end)
+
+                    local hdrFrame = CreateFrame("Frame", nil, sessionContent, "BackdropTemplate")
+                    hdrFrame:SetSize(sessionContent:GetWidth() - 50, 16)
+                    hdrFrame:SetPoint("TOPLEFT", 40, -yOff)
+                    hdrFrame:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
+                    hdrFrame:SetBackdropColor(0.04, 0.04, 0.08, 1)
+                    local function Hdr(txt, x)
+                        UI:CreateText(hdrFrame, txt, 8, C.accent.r, C.accent.g, C.accent.b):SetPoint("LEFT", x, 0)
+                    end
+                    Hdr("PLAYER", 6); Hdr("SCORE", 120); Hdr("LATE", 170); Hdr("LEFT EARLY", 210); Hdr("NO CONS", 290)
+                    yOff = yOff + 18
+
+                    for pIdx, p in ipairs(playerList) do
+                        local pRow = CreateFrame("Frame", nil, sessionContent, "BackdropTemplate")
+                        pRow:SetSize(sessionContent:GetWidth() - 50, 18)
+                        pRow:SetPoint("TOPLEFT", 40, -yOff)
+                        pRow:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
+                        local pbg = (pIdx % 2 == 1) and { r=0.05, g=0.04, b=0.09 } or { r=0.07, g=0.06, b=0.12 }
+                        pRow:SetBackdropColor(pbg.r, pbg.g, pbg.b, 0.9)
+
+                        local cr, cg, cb = BRutus:GetClassColor(p.class)
+                        local nameT = UI:CreateText(pRow, p.name, 9, cr, cg, cb)
+                        nameT:SetPoint("LEFT", 6, 0); nameT:SetWidth(110)
+
+                        local sr, sg, sb = C.green.r, C.green.g, C.green.b
+                        if p.score < 75 then sr, sg, sb = C.gold.r, C.gold.g, C.gold.b end
+                        if p.score < 50 then sr, sg, sb = C.red.r,  C.red.g,  C.red.b  end
+                        UI:CreateText(pRow, p.score .. "%", 9, sr, sg, sb):SetPoint("LEFT", 120, 0)
+
+                        local function Flag(x, val, redTxt, greenTxt)
+                            local fr, fg, fb = val and C.red.r or C.green.r, val and C.red.g or C.green.g, val and C.red.b or C.green.b
+                            UI:CreateText(pRow, val and redTxt or greenTxt, 8, fr, fg, fb):SetPoint("LEFT", x, 0)
+                        end
+                        Flag(170, p.wasLate,   "LATE", "OK")
+                        Flag(210, p.leftEarly, "LEFT", "OK")
+
+                        local consStr = p.consumeChecks > 0 and format("%d/%d", p.consumeHits, p.consumeChecks) or "-"
+                        local cr2 = not p.noConsumes and C.green or C.red
+                        UI:CreateText(pRow, consStr, 8, cr2.r, cr2.g, cr2.b):SetPoint("LEFT", 290, 0)
+
+                        yOff = yOff + 20
+                    end
+                    yOff = yOff + 6
+                end
+            end -- for sessions in group
+        end -- if isGroupExp
+    end -- for groups
     sessionContent:SetHeight(math.max(1, yOff))
 
     ----------------------------------------------------------------
@@ -1068,6 +1144,67 @@ function BRutus:RefreshSettingsPanel(content)
     tmbCouncil.checkbox.onChanged = function(_, checked)
         BRutus.db.lootMaster.tmbOnlyMode = checked
         if BRutus.LootMaster then BRutus.LootMaster.TMB_ONLY_MODE = checked end
+    end
+    yOff = yOff + 28
+
+    --------------------------------------------------------------------
+    -- LOOT DISTRIBUTION SETTINGS (officer only)
+    --------------------------------------------------------------------
+    local ldSep = UI:CreateSeparator(content)
+    ldSep:SetPoint("TOPLEFT", 0, -yOff)
+    ldSep:SetPoint("TOPRIGHT", -10, -yOff)
+    yOff = yOff + 12
+
+    local ldTitle = UI:CreateHeaderText(content, "LOOT DISTRIBUTION", 12)
+    ldTitle:SetPoint("TOPLEFT", 0, -yOff)
+    yOff = yOff + 22
+
+    -- Min attendance for MS roll
+    local minAttLabel = UI:CreateText(content, "Min. Attendance for MS Roll (%):", 11, C.white.r, C.white.g, C.white.b)
+    minAttLabel:SetPoint("TOPLEFT", 8, -yOff)
+
+    local minAttBox = CreateFrame("EditBox", nil, content, "BackdropTemplate")
+    minAttBox:SetSize(50, 22)
+    minAttBox:SetPoint("LEFT", minAttLabel, "RIGHT", 10, 0)
+    minAttBox:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
+    minAttBox:SetBackdropColor(0.06, 0.05, 0.10, 0.9)
+    minAttBox:SetBackdropBorderColor(C.accent.r, C.accent.g, C.accent.b, 0.5)
+    minAttBox:SetFont("Fonts\\FRIZQT__.TTF", 11, "OUTLINE")
+    minAttBox:SetTextColor(C.gold.r, C.gold.g, C.gold.b)
+    minAttBox:SetNumeric(true)
+    minAttBox:SetMaxLetters(3)
+    minAttBox:SetAutoFocus(false)
+    minAttBox:SetText(tostring(BRutus.db.lootMaster.minAttendancePct or 0))
+    minAttBox:SetScript("OnEnterPressed", function(self)
+        local val = math.max(0, math.min(100, tonumber(self:GetText()) or 0))
+        BRutus.db.lootMaster.minAttendancePct = val
+        BRutus:Print("Min. MS attendance set to " .. val .. "%" .. (val == 0 and " (disabled)" or ""))
+        self:ClearFocus()
+    end)
+    minAttBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+
+    local minAttHint = UI:CreateText(content, "0 = disabled. Below this % MS is auto-downgraded to OS.", 9, C.silver.r, C.silver.g, C.silver.b)
+    minAttHint:SetPoint("LEFT", minAttBox, "RIGHT", 8, 0)
+    minAttHint:SetWidth(280)
+    yOff = yOff + 30
+
+    -- Attendance as roll tiebreaker
+    local attTie = UI:CreateCheckbox(content, "Use 25-man Attendance as Roll Tiebreaker", 18)
+    attTie:SetPoint("TOPLEFT", 8, -yOff)
+    attTie.checkbox:SetChecked(BRutus.db.lootMaster.attTiebreaker ~= false)
+    attTie.checkbox.onChanged = function(_, checked)
+        BRutus.db.lootMaster.attTiebreaker = checked
+        if BRutus.LootMaster then BRutus.LootMaster.ATT_TIEBREAKER = checked end
+    end
+    yOff = yOff + 28
+
+    -- Penalize recent receivers
+    local recvPen = UI:CreateCheckbox(content, "Penalize Players Who Received Items This Lockout", 18)
+    recvPen:SetPoint("TOPLEFT", 8, -yOff)
+    recvPen.checkbox:SetChecked(BRutus.db.lootMaster.recvPenalty ~= false)
+    recvPen.checkbox.onChanged = function(_, checked)
+        BRutus.db.lootMaster.recvPenalty = checked
+        if BRutus.LootMaster then BRutus.LootMaster.RECV_PENALTY = checked end
     end
     yOff = yOff + 28
 

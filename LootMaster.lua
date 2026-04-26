@@ -12,14 +12,17 @@ LootMaster.ROLL_OS     = "OS"    -- Off Spec
 LootMaster.ROLL_PASS   = "PASS"
 
 -- State
-LootMaster.activeLoot   = nil     -- currently announced item
-LootMaster.rolls        = {}      -- [playerKey] = { name, class, rollType, roll, tmb }
-LootMaster.rollTimer    = nil
-LootMaster.isMLSession  = false
-LootMaster.lootWindowOpen = false  -- tracks whether loot window is open
-LootMaster.awardHistory = {}      -- recent awards for undo
-LootMaster.pendingTrades = {}     -- items awaiting trade: [itemId] = { player, link, itemId, timestamp }
-LootMaster.testMode     = false   -- when true, bypasses raid/ML checks for local testing
+LootMaster.activeLoot        = nil    -- currently announced item
+LootMaster.rolls             = {}     -- [playerKey] = { name, class, rollType, roll, tmb }
+LootMaster.rollTimer         = nil
+LootMaster.isMLSession       = false
+LootMaster.lootWindowOpen    = false  -- tracks whether loot window is open
+LootMaster.listeningForRolls = false  -- true while capturing /roll results from CHAT_MSG_SYSTEM
+LootMaster.restrictedRollers = nil    -- set of lowercased names allowed to roll in a tied session; nil = everyone
+LootMaster.awardHistory      = {}     -- recent awards for undo
+LootMaster.pendingTrades     = {}     -- items awaiting trade: [itemId] = { player, link, itemId, timestamp }
+LootMaster.testMode          = false  -- when true, bypasses raid/ML checks for local testing
+LootMaster.rollPattern       = nil    -- built in Initialize() from RANDOM_ROLL_RESULT
 
 -- Config defaults
 LootMaster.ROLL_DURATION = 30     -- seconds to wait for rolls
@@ -61,10 +64,26 @@ function LootMaster:Initialize()
     self.TMB_ONLY_MODE = BRutus.db.lootMaster.tmbOnlyMode or false
     self.pendingTrades = {}
 
+    -- Ensure loot-distribution settings exist (added in v2)
+    local lmdb = BRutus.db.lootMaster
+    if lmdb.minAttendancePct == nil then lmdb.minAttendancePct = 0    end
+    if lmdb.attTiebreaker    == nil then lmdb.attTiebreaker    = true end
+    if lmdb.recvPenalty      == nil then lmdb.recvPenalty      = true end
+
+    -- Build /roll detection pattern from localized RANDOM_ROLL_RESULT global
+    -- e.g. EN: "%s rolls %d (%d-%d)."  → ^(.+) rolls (%d+) %((%d+)%-(%d+)%)%.$
+    do
+        local tmpl = RANDOM_ROLL_RESULT or "%s rolls %d (%d-%d)."
+        local p = tmpl:gsub("[%(%)%.%%%+%-%*%?%[%]%^%$]", "%%%1")
+        p = p:gsub("%%%%s", "(.+)"):gsub("%%%%d", "(%%d+)")
+        self.rollPattern = "^" .. p .. "$"
+    end
+
     local frame = CreateFrame("Frame")
     frame:RegisterEvent("LOOT_OPENED")
     frame:RegisterEvent("LOOT_CLOSED")
     frame:RegisterEvent("CHAT_MSG_ADDON")
+    frame:RegisterEvent("CHAT_MSG_SYSTEM")  -- capture /roll results
     frame:RegisterEvent("TRADE_SHOW")
     frame:RegisterEvent("TRADE_ACCEPT_UPDATE")
     frame:RegisterEvent("UI_ERROR_MESSAGE")
@@ -75,6 +94,8 @@ function LootMaster:Initialize()
             LootMaster:OnLootClosed()
         elseif event == "CHAT_MSG_ADDON" then
             LootMaster:OnAddonMessage(...)
+        elseif event == "CHAT_MSG_SYSTEM" then
+            LootMaster:OnSystemMessage(...)
         elseif event == "TRADE_SHOW" then
             LootMaster:OnTradeShow()
         elseif event == "TRADE_ACCEPT_UPDATE" then
@@ -84,6 +105,31 @@ function LootMaster:Initialize()
 
     C_ChatInfo.RegisterAddonMessagePrefix("BRutusLM")
     self.eventFrame = frame
+end
+
+----------------------------------------------------------------------
+-- Returns { att25, recvThisLockout } for a player — used for roll
+-- gating, sort tiebreakers, and UI column display.
+----------------------------------------------------------------------
+function LootMaster:GetPlayerContext(playerName)
+    local ctx = { att25 = 0, recvThisLockout = 0 }
+    if not playerName then return ctx end
+
+    -- 25-man attendance %
+    if BRutus.RaidTracker then
+        local pKey = BRutus:GetPlayerKey(playerName, GetRealmName())
+        ctx.att25 = BRutus.RaidTracker:GetAttendance25ManPercent(pKey) or 0
+    end
+
+    -- Items received this lockout (same instance + TBC reset week)
+    if BRutus.TMB then
+        local _, _, _, _, _, _, _, instID = GetInstanceInfo()
+        local wNum = BRutus.RaidTracker
+            and BRutus.RaidTracker:GetWeekNum(GetServerTime()) or 0
+        ctx.recvThisLockout = BRutus.TMB:GetReceivedThisLockout(playerName, instID, wNum)
+    end
+
+    return ctx
 end
 
 ----------------------------------------------------------------------
@@ -115,18 +161,91 @@ function LootMaster:IsMasterLooter()
         end
     end
 
-    -- 4. Fallback: raid leader or assistant can manage loot
+    -- 4. Fallback: only the raid LEADER counts as ML (assistants cannot start rolls)
     if IsInRaid() then
         local myName = UnitName("player")
         for i = 1, GetNumGroupMembers() do
             local name, rank = GetRaidRosterInfo(i)
             if name and name == myName then
-                return rank >= 1 -- 1 = assistant, 2 = leader
+                return rank == 2 -- leader only; assistants (rank 1) are NOT allowed
             end
         end
     end
 
     return false
+end
+
+----------------------------------------------------------------------
+-- /roll capture: start/stop listening for CHAT_MSG_SYSTEM roll results
+----------------------------------------------------------------------
+function LootMaster:StartListeningForRolls()
+    self.listeningForRolls = true
+end
+
+function LootMaster:StopListeningForRolls()
+    self.listeningForRolls = false
+end
+
+-- Called on every CHAT_MSG_SYSTEM event
+function LootMaster:OnSystemMessage(message)
+    if not self.listeningForRolls or not self.activeLoot then return end
+    self:ProcessSystemRoll(message)
+end
+
+----------------------------------------------------------------------
+-- Parse a CHAT_MSG_SYSTEM /roll line and register it as MS or OS.
+--   MS = RandomRoll(1, 100)  |  OS = RandomRoll(1, 99)
+-- All other roll ranges are ignored.
+----------------------------------------------------------------------
+function LootMaster:ProcessSystemRoll(message)
+    if not self.rollPattern then return end
+
+    local roller, roll, low, high = string.match(message, self.rollPattern)
+    if not roller then return end
+
+    roll = tonumber(roll)
+    low  = tonumber(low)
+    high = tonumber(high)
+    if not roll or not low or not high then return end
+
+    -- Only the two agreed-upon ranges count; ignore all other /roll usage
+    local rollType
+    if low == 1 and high == 100 then
+        rollType = "MS"
+    elseif low == 1 and high == 99 then
+        rollType = "OS"
+    else
+        return
+    end
+
+    -- Strip realm suffix that may appear in some client versions
+    local cleanName = roller:match("^([^%-]+)") or roller
+
+    -- Verify the roller is currently in the raid (or testMode)
+    local inRaid = self.testMode
+    if not inRaid then
+        local numMembers = GetNumGroupMembers() or 0
+        for i = 1, numMembers do
+            local uName = UnitName("raid" .. i)
+            if uName and (uName == cleanName or uName == roller) then
+                inRaid = true
+                break
+            end
+        end
+        -- Also accept own roll (solo / testMode outside raid)
+        if not inRaid and cleanName == UnitName("player") then
+            inRaid = true
+        end
+    end
+
+    if not inRaid then return end
+
+    -- Restricted-roll session: only allowed players may roll; ignore everyone else silently
+    if self.restrictedRollers and not self.restrictedRollers[strlower(cleanName)] then
+        return
+    end
+
+    self:RegisterRoll(cleanName, rollType, roll)
 end
 
 ----------------------------------------------------------------------
@@ -234,7 +353,11 @@ function LootMaster:ResolveTMBCouncil(itemId)
 end
 
 ----------------------------------------------------------------------
--- Announce an item for rolling
+-- Announce an item for rolling.
+-- Priority logic (always active, regardless of TMB_ONLY_MODE):
+--   ≥ 2 players tied at top TMB prio in raid → restricted roll (only they roll)
+--   1 clear winner + TMB_ONLY_MODE           → AutoCouncilAward (direct award prompt)
+--   otherwise                                 → open MS/OS roll for all
 ----------------------------------------------------------------------
 function LootMaster:AnnounceItem(itemLink, lootSlot)
     if not IsInRaid() and not self.testMode then
@@ -243,25 +366,23 @@ function LootMaster:AnnounceItem(itemLink, lootSlot)
     end
 
     -- Clear previous session
-    self.rolls = {}
+    self.rolls             = {}
+    self.restrictedRollers = nil
     self.activeLoot = {
-        link = itemLink,
-        slot = lootSlot,
+        link      = itemLink,
+        slot      = lootSlot,
         startTime = GetServerTime(),
-        endTime = GetServerTime() + self.ROLL_DURATION,
+        endTime   = GetServerTime() + self.ROLL_DURATION,
     }
 
-    -- Extract item ID for TMB lookup
     local itemId = tonumber(itemLink:match("item:(%d+)"))
     self.activeLoot.itemId = itemId
 
-    -- TMB Auto-Council: resolve before announcing rolls
-    if self.TMB_ONLY_MODE and itemId and itemId > 0 then
+    -- Always check TMB for tied top-priority players currently in raid
+    if itemId and itemId > 0 then
         local council = self:ResolveTMBCouncil(itemId)
         if council then
-            -- Check if there's a single clear winner at the highest priority
-            local top = council[1]
-            -- Collect all candidates sharing the same tier + order as the top
+            local top  = council[1]
             local tied = {}
             for _, c in ipairs(council) do
                 if c.tmbType == top.tmbType and c.order == top.order then
@@ -269,37 +390,51 @@ function LootMaster:AnnounceItem(itemLink, lootSlot)
                 end
             end
 
-            if #tied == 1 then
-                -- Single clear winner: auto-award
+            if #tied >= 2 then
+                -- Tie at top priority: only those players roll
+                self:StartRestrictedRoll(tied, council, itemLink, lootSlot, itemId)
+                return
+            elseif #tied == 1 and self.TMB_ONLY_MODE then
+                -- Single clear winner + TMB-only mode: prompt ML for direct award
                 self:AutoCouncilAward(top, itemLink, lootSlot, council)
                 return
-            else
-                -- Multiple players at same priority: they roll among themselves
-                self:AutoCouncilRoll(tied, itemLink, lootSlot, council)
-                return
             end
+            -- Single winner but TMB_ONLY_MODE off: open roll for all, mention winner
+            self:DoNormalAnnounce(itemLink, lootSlot, itemId, top)
+            return
         end
-        -- No TMB data for this item: fall through to normal announce
-        BRutus:Print("|cffFFFF00No TMB data for this item - opening normal roll.|r")
     end
 
-    self:DoNormalAnnounce(itemLink, lootSlot, itemId)
+    -- No TMB data for this item: open roll for all
+    self:DoNormalAnnounce(itemLink, lootSlot, itemId, nil)
 end
 
 ----------------------------------------------------------------------
--- Normal announce (no auto-council)
+-- Normal announce — open MS/OS roll for everyone in the raid.
+-- topPrioEntry (optional): TMB entry of the single top-prio player, used
+-- to post an info line about who has priority (without restricting rolls).
 ----------------------------------------------------------------------
-function LootMaster:DoNormalAnnounce(itemLink, _lootSlot, itemId)
-    -- Announce in raid chat
-    local msg = string.format("{rt4} ROLL: %s {rt4}  -  /w ML: MS / OS / PASS  -  %ds", itemLink, self.ROLL_DURATION)
+function LootMaster:DoNormalAnnounce(itemLink, _lootSlot, itemId, topPrioEntry)
+    -- Main announce
+    local msg = format("{rt4} ROLL: %s {rt4}  |  /roll 1-100 = MS  |  /roll 1-99 = OS  |  %ds",
+        itemLink, self.ROLL_DURATION)
     self:SafeSendChat(msg, "RAID_WARNING")
 
-    -- Send addon message to all raiders with BRutus
-    local tmbFlag = self.TMB_ONLY_MODE and "1" or "0"
-    local payload = string.format("ANNOUNCE|%s|%d|%d|%s", itemLink, self.ROLL_DURATION, itemId or 0, tmbFlag)
+    -- If someone has TMB priority (but no tie), announce them as an info note
+    if topPrioEntry then
+        local infoMsg = format("[TMB] Prioridade: %s (%s #%d) — roll aberto para todos",
+            topPrioEntry.name, topPrioEntry.tmbType, topPrioEntry.order)
+        self:SafeSendChat(infoMsg, "RAID")
+    end
+
+    -- Send addon message so BRutus users get the roll popup
+    local payload = format("ANNOUNCE|%s|%d|%d|0", itemLink, self.ROLL_DURATION, itemId or 0)
     self:SafeSendAddon("BRutusLM", payload, "RAID")
 
-    -- Start timer
+    -- Start capturing /roll results from CHAT_MSG_SYSTEM
+    self:StartListeningForRolls()
+
+    -- Start countdown timer
     if self.rollTimer then self.rollTimer:Cancel() end
     self.rollTimer = C_Timer.NewTimer(self.ROLL_DURATION, function()
         LootMaster:EndRolling()
@@ -330,37 +465,54 @@ function LootMaster:AutoCouncilAward(winner, itemLink, lootSlot, allCandidates)
 end
 
 ----------------------------------------------------------------------
--- Auto-Council: multiple players tied at same TMB priority - they roll
+-- Restricted roll: only the tied top-priority players may roll.
+-- Rolls from anyone else are silently ignored by ProcessSystemRoll.
 ----------------------------------------------------------------------
-function LootMaster:AutoCouncilRoll(tied, itemLink, _lootSlot, _allCandidates)
-    -- Build names string
+function LootMaster:StartRestrictedRoll(tied, allCandidates, itemLink, _lootSlot, itemId)
+    -- Build restricted set (lowercase names for fast lookup)
+    self.restrictedRollers = {}
     local names = {}
-    for _, c in ipairs(tied) do table.insert(names, c.name) end
-    local tmbStr = string.format("%s #%d", tied[1].tmbType, tied[1].order)
+    for _, c in ipairs(tied) do
+        self.restrictedRollers[strlower(c.name)] = true
+        table.insert(names, c.name)
+    end
+    local tmbStr  = string.format("%s #%d", tied[1].tmbType, tied[1].order)
+    local nameStr = table.concat(names, ", ")
 
-    -- Announce tied roll in raid
+    -- Announce in RAID_WARNING — only listed players should roll
     self:SafeSendChat(
-        string.format("{rt4} TMB Council: %s - Tied [%s]: %s - Rolling! {rt4}",
-            itemLink, tmbStr, table.concat(names, ", ")),
+        string.format("{rt4} ROLL: %s {rt4}  |  Prioridade empatada [%s]: %s  |  /roll 1-100 MS  |  /roll 1-99 OS  |  %ds",
+            itemLink, tmbStr, nameStr, self.ROLL_DURATION),
         "RAID_WARNING"
     )
 
-    -- Send ANNOUNCE only to those tied players
-    local itemId = self.activeLoot.itemId or 0
+    -- Addon comm: show popup to BRutus users who have the item on TMB
+    itemId = itemId or (self.activeLoot and self.activeLoot.itemId) or 0
     local payload = string.format("ANNOUNCE|%s|%d|%d|1", itemLink, self.ROLL_DURATION, itemId)
     self:SafeSendAddon("BRutusLM", payload, "RAID")
 
-    -- Start timer
+    -- Start capturing /roll (restricted list enforced in ProcessSystemRoll)
+    self:StartListeningForRolls()
+
+    -- Timer
     if self.rollTimer then self.rollTimer:Cancel() end
     self.rollTimer = C_Timer.NewTimer(self.ROLL_DURATION, function()
         LootMaster:EndRolling()
     end)
 
-    -- Show roll frame for ML
+    -- Show roll tracker for ML
     self:ShowRollFrame()
 
-    BRutus:Print(string.format("TMB tie: %d players at [%s] rolling for %s",
-        #tied, tmbStr, itemLink))
+    BRutus:Print(string.format("|cffFFD700TMB tie|r [%s]: %s — apenas eles podem rolar (%ds)",
+        tmbStr, nameStr, self.ROLL_DURATION))
+end
+
+----------------------------------------------------------------------
+-- Kept for compatibility: delegates to StartRestrictedRoll
+----------------------------------------------------------------------
+function LootMaster:AutoCouncilRoll(tied, itemLink, lootSlot, allCandidates)
+    local itemId = self.activeLoot and self.activeLoot.itemId or 0
+    self:StartRestrictedRoll(tied, allCandidates, itemLink, lootSlot, itemId)
 end
 
 ----------------------------------------------------------------------
@@ -374,7 +526,7 @@ function LootMaster:ShowCouncilResultFrame(winner, itemLink, lootSlot, allCandid
 
     local numRows = allCandidates and #allCandidates or 0
     local f = CreateFrame("Frame", "BRutusCouncilFrame", UIParent, "BackdropTemplate")
-    f:SetSize(380, 110 + numRows * 22)
+    f:SetSize(460, 110 + numRows * 22)
     f:SetPoint("CENTER")
     f:SetBackdrop({
         bgFile   = "Interface\\Buttons\\WHITE8x8",
@@ -427,14 +579,21 @@ function LootMaster:ShowCouncilResultFrame(winner, itemLink, lootSlot, allCandid
     if allCandidates then
         for i, c in ipairs(allCandidates) do
             local ccc = CLASS_COLORS[c.class] or { r = 0.8, g = 0.8, b = 0.8 }
+            local ctx = LootMaster:GetPlayerContext(c.name)
+            local attColor = ctx.att25 >= 60 and "00FF00" or ctx.att25 >= 40 and "FFFF00" or "FF4444"
+            local recvColor = ctx.recvThisLockout >= 2 and "FF4444"
+                or ctx.recvThisLockout == 1 and "FFFF00" or "888888"
             local row = f:CreateFontString(nil, "OVERLAY")
             row:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
             row:SetPoint("TOPLEFT", 14, yOff)
             local tc = c.tmbType == "prio" and "|cffFF8000" or "|cff4CB8FF"
             local prefix = (i == 1) and "|cff00ff00>>|r " or "   "
-            row:SetText(string.format("%s|cff%02x%02x%02x%s|r  %s%s #%d|r",
+            row:SetText(string.format(
+                "%s|cff%02x%02x%02x%s|r  %s%s #%d|r  |cff%s%d%%|r  |cff%sR:%d|r",
                 prefix, ccc.r * 255, ccc.g * 255, ccc.b * 255,
-                c.name, tc, c.tmbType, c.order))
+                c.name, tc, c.tmbType, c.order,
+                attColor, ctx.att25,
+                recvColor, ctx.recvThisLockout))
             yOff = yOff - 18
         end
     end
@@ -502,15 +661,6 @@ function LootMaster:OnAddonMessage(prefix, msg, channel, sender)
             self:ShowRollPopup(link, duration, itemId)
         end
 
-    elseif cmd == "ROLL" then
-        -- A raider sent their roll choice
-        if self:IsMasterLooter() and self.activeLoot then
-            local rollType = rest -- MS, OS, or PASS
-            if rollType == "MS" or rollType == "OS" or rollType == "PASS" then
-                self:RegisterRoll(sender, rollType)
-            end
-        end
-
     elseif cmd == "AWARD" then
         -- ML awarded item (informational broadcast)
         local awardedTo, link = rest:match("^([^|]+)|(.+)$")
@@ -521,25 +671,26 @@ function LootMaster:OnAddonMessage(prefix, msg, channel, sender)
 end
 
 ----------------------------------------------------------------------
--- Register a player's roll
+-- Register a player's /roll result (called from ProcessSystemRoll).
+-- name: bare player name (no realm);  rollType: "MS" or "OS";
+-- roll: the actual number the player rolled.
 ----------------------------------------------------------------------
-function LootMaster:RegisterRoll(sender, rollType)
+function LootMaster:RegisterRoll(name, rollType, roll)
     if not self.activeLoot then return end
 
-    -- Normalize sender name
-    local name = sender:match("^([^-]+)")
-    local realm = sender:match("-(.+)$") or GetRealmName()
-    local key = name .. "-" .. realm
+    local key = name .. "-" .. (GetRealmName() or "")
 
-    -- Generate random roll
-    local roll = 0
-    if rollType == "MS" then
-        roll = math.random(1, 100)
-    elseif rollType == "OS" then
-        roll = math.random(1, 100)
+    -- Attendance gate: auto-downgrade MS → OS if below minimum threshold
+    local ctx = self:GetPlayerContext(name)
+    local minAtt = BRutus.db.lootMaster.minAttendancePct or 0
+    if rollType == "MS" and minAtt > 0 and ctx.att25 < minAtt then
+        rollType = "OS"
+        self:SafeSendChat(string.format(
+            "[Loot] %s: MS downgraded to OS (attendance %d%% < required %d%%)",
+            name, ctx.att25, minAtt), "RAID")
     end
 
-    -- Get TMB data if available
+    -- TMB lookup
     local tmbInfo = nil
     if BRutus.TMB and self.activeLoot.itemId then
         local interest = BRutus.TMB:GetItemInterest(self.activeLoot.itemId)
@@ -553,7 +704,7 @@ function LootMaster:RegisterRoll(sender, rollType)
         end
     end
 
-    -- Get class
+    -- Class from raid unit or stored member data
     local class = "UNKNOWN"
     local numMembers = GetNumGroupMembers() or 0
     if numMembers > 0 then
@@ -566,11 +717,9 @@ function LootMaster:RegisterRoll(sender, rollType)
             end
         end
     end
-    -- Fallback: check stored addon data or player's own class
     if class == "UNKNOWN" then
-        local playerRealm = GetRealmName()
-        local pKey = BRutus:GetPlayerKey(name, playerRealm)
-        local memberData = BRutus.db.members[pKey]
+        local pKey = BRutus:GetPlayerKey(name, GetRealmName())
+        local memberData = BRutus.db.members and BRutus.db.members[pKey]
         if memberData and memberData.class then
             class = memberData.class
         elseif name == UnitName("player") then
@@ -579,23 +728,22 @@ function LootMaster:RegisterRoll(sender, rollType)
     end
 
     self.rolls[key] = {
-        name = name,
-        class = class,
-        rollType = rollType,
-        roll = roll,
-        tmb = tmbInfo,
+        name      = name,
+        class     = class,
+        rollType  = rollType,
+        roll      = roll,   -- actual /roll result (1-100 or 1-99)
+        tmb       = tmbInfo,
+        att25     = ctx.att25,
+        recvCount = ctx.recvThisLockout,
     }
 
-    -- Notify raid of the roll
-    if rollType ~= "PASS" then
-        local tmbStr = ""
-        if tmbInfo then
-            tmbStr = string.format(" [TMB: %s #%d]", tmbInfo.type, tmbInfo.order)
-        end
-        self:SafeSendChat(string.format("%s rolls %d (%s)%s", name, roll, rollType, tmbStr), "RAID")
+    -- Announce TMB tier to raid (the /roll number is already visible in system chat)
+    if tmbInfo then
+        self:SafeSendChat(string.format("[Loot] %s: %s [TMB: %s #%d]",
+            name, rollType, tmbInfo.type, tmbInfo.order), "RAID")
     end
 
-    -- Refresh UI
+    -- Refresh ML roll frame
     if self.rollFrame and self.rollFrame:IsShown() then
         self:RefreshRollFrame()
     end
@@ -606,6 +754,9 @@ end
 ----------------------------------------------------------------------
 function LootMaster:EndRolling()
     if not self.activeLoot then return end
+
+    self:StopListeningForRolls()
+    self.restrictedRollers = nil
 
     if self.rollTimer then
         self.rollTimer:Cancel()
@@ -633,7 +784,15 @@ function LootMaster:EndRolling()
         if a.tmb and b.tmb and a.tmb.order ~= b.tmb.order then
             return a.tmb.order < b.tmb.order
         end
-        -- Tiebreaker: higher roll
+        -- Attendance tiebreaker: higher 25-man attendance wins
+        if BRutus.db.lootMaster.attTiebreaker and (a.att25 or 0) ~= (b.att25 or 0) then
+            return (a.att25 or 0) > (b.att25 or 0)
+        end
+        -- Received penalty: fewer items received this lockout ranks higher
+        if BRutus.db.lootMaster.recvPenalty and (a.recvCount or 0) ~= (b.recvCount or 0) then
+            return (a.recvCount or 0) < (b.recvCount or 0)
+        end
+        -- Final tiebreaker: higher roll
         return a.roll > b.roll
     end)
 
@@ -722,6 +881,14 @@ function LootMaster:AwardLoot(playerName)
         BRutus:Print(itemLink .. " given to |cff00ff00" .. playerName .. "|r")
     else
         BRutus:Print(itemLink .. " awarded to |cff00ff00" .. playerName .. "|r - trade to deliver.")
+    end
+
+    -- Record in TMB local data for lockout-received tracking
+    if BRutus.TMB and itemId then
+        local _, _, _, _, _, _, _, instID = GetInstanceInfo()
+        local wNum = BRutus.RaidTracker
+            and BRutus.RaidTracker:GetWeekNum(GetServerTime()) or 0
+        BRutus.TMB:RecordReceived(playerName, itemId, itemLink, instID, wNum)
     end
 
     self.activeLoot = nil
@@ -839,6 +1006,8 @@ end
 -- Cancel current rolling session
 ----------------------------------------------------------------------
 function LootMaster:CancelRolling()
+    self:StopListeningForRolls()
+    self.restrictedRollers = nil
     if self.rollTimer then
         self.rollTimer:Cancel()
         self.rollTimer = nil
@@ -855,10 +1024,16 @@ function LootMaster:CancelRolling()
 end
 
 ----------------------------------------------------------------------
--- Raider: send roll choice to ML via addon message
+-- Raider: perform /roll (MS = 1-100, OS = 1-99).
+-- The ML captures the result via CHAT_MSG_SYSTEM — no addon comm needed.
 ----------------------------------------------------------------------
 function LootMaster:SendMyRoll(rollType)
-    self:SafeSendAddon("BRutusLM", "ROLL|" .. rollType, "RAID")
+    if rollType == "MS" then
+        RandomRoll(1, 100)
+    elseif rollType == "OS" then
+        RandomRoll(1, 99)
+    end
+    -- PASS: nothing to send — simply not rolling is sufficient
 end
 
 ----------------------------------------------------------------------
@@ -935,26 +1110,25 @@ function LootMaster:ShowRollPopup(itemLink, duration, itemId)
     msBtn:SetPoint("BOTTOMLEFT", 15, 10)
     msBtn:SetBackdropColor(0.0, 0.4, 0.0, 0.6)
     msBtn:SetScript("OnClick", function()
-        LootMaster:SendMyRoll("MS")
+        RandomRoll(1, 100)  -- MS = /roll 1-100  (captured by ML via CHAT_MSG_SYSTEM)
         f:Hide()
-        BRutus:Print("Rolled |cff00ff00MS|r on " .. (itemLink or "item"))
+        BRutus:Print("Rolled |cff00ff00MS|r on " .. (itemLink or "item") .. " — /roll 1-100")
     end)
 
     local osBtn = UI:CreateButton(f, "OS", 80, 26)
     osBtn:SetPoint("BOTTOM", 0, 10)
     osBtn:SetBackdropColor(0.3, 0.3, 0.0, 0.6)
     osBtn:SetScript("OnClick", function()
-        LootMaster:SendMyRoll("OS")
+        RandomRoll(1, 99)   -- OS = /roll 1-99
         f:Hide()
-        BRutus:Print("Rolled |cffFFFF00OS|r on " .. (itemLink or "item"))
+        BRutus:Print("Rolled |cffFFFF00OS|r on " .. (itemLink or "item") .. " — /roll 1-99")
     end)
 
     local passBtn = UI:CreateButton(f, "Pass", 80, 26)
     passBtn:SetPoint("BOTTOMRIGHT", -15, 10)
     passBtn:SetBackdropColor(0.4, 0.0, 0.0, 0.6)
     passBtn:SetScript("OnClick", function()
-        LootMaster:SendMyRoll("PASS")
-        f:Hide()
+        f:Hide()  -- Just close — no roll needed to pass
     end)
 
     -- Timer bar
@@ -1010,7 +1184,7 @@ function LootMaster:ShowLootFrame(items)
 
     if self.lootFrame then self.lootFrame:Hide() end
 
-    local FRAME_W = 600
+    local FRAME_W = 680
     local FRAME_H = 440
     local LEFT_W  = 178
     local RIGHT_X = LEFT_W + 12
@@ -1105,7 +1279,7 @@ function LootMaster:ShowLootFrame(items)
         t:SetTextColor(C.accent.r, C.accent.g, C.accent.b)
         t:SetText(txt)
     end
-    PH("#", 4); PH("TYPE", 22); PH("ORDER", 64); PH("PLAYER", 106); PH("IN RAID", 260)
+    PH("#", 4); PH("TYPE", 22); PH("ORDER", 64); PH("PLAYER", 106); PH("ATT%", 210); PH("RECV", 255); PH("IN RAID", 295)
 
     -- Priority scroll area
     local prioContainer = CreateFrame("Frame", nil, f)
@@ -1170,10 +1344,7 @@ function LootMaster:ShowLootFrame(items)
     local function DoAward(item, entryName)
         local iId = tonumber(item.link:match("item:(%d+)"))
         LootMaster:SetActiveLoot(item.link, item.slot, iId)
-        LootMaster:AwardLoot(entryName)
-        if BRutus.TMB and iId then
-            BRutus.TMB:RecordReceived(entryName, iId, item.link)
-        end
+        LootMaster:AwardLoot(entryName)  -- RecordReceived is called inside AwardLoot
         statusText:SetText("|cff4CFF4CAwarded to " .. entryName .. "!|r")
         if itemBtns[item.slot] then
             itemBtns[item.slot].awardedText:Show()
@@ -1336,7 +1507,7 @@ function LootMaster:ShowLootFrame(items)
             local nameT = row:CreateFontString(nil, "OVERLAY")
             nameT:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
             nameT:SetPoint("LEFT", 106, 0)
-            nameT:SetWidth(148)
+            nameT:SetWidth(100)
             if isPresent then
                 local rClass = raidMap[strlower(e.name)]
                 local cr, cg, cb = BRutus:GetClassColor(rClass or e.class)
@@ -1346,10 +1517,41 @@ function LootMaster:ShowLootFrame(items)
             end
             nameT:SetText(e.name)
 
+            -- Column: ATT% (25-man attendance)
+            local attCtx = LootMaster:GetPlayerContext(e.name)
+            local attT = row:CreateFontString(nil, "OVERLAY")
+            attT:SetFont("Fonts\\FRIZQT__.TTF", 9, "OUTLINE")
+            attT:SetPoint("LEFT", 210, 0)
+            attT:SetWidth(40)
+            attT:SetJustifyH("CENTER")
+            if attCtx.att25 >= 60 then
+                attT:SetTextColor(0.3, 1.0, 0.3)
+            elseif attCtx.att25 >= 40 then
+                attT:SetTextColor(1.0, 1.0, 0.3)
+            else
+                attT:SetTextColor(1.0, 0.3, 0.3)
+            end
+            attT:SetText(attCtx.att25 .. "%")
+
+            -- Column: RECV (items received this lockout)
+            local recvT = row:CreateFontString(nil, "OVERLAY")
+            recvT:SetFont("Fonts\\FRIZQT__.TTF", 9, "OUTLINE")
+            recvT:SetPoint("LEFT", 255, 0)
+            recvT:SetWidth(35)
+            recvT:SetJustifyH("CENTER")
+            if attCtx.recvThisLockout == 0 then
+                recvT:SetTextColor(0.4, 0.4, 0.4)
+            elseif attCtx.recvThisLockout == 1 then
+                recvT:SetTextColor(1.0, 1.0, 0.3)
+            else
+                recvT:SetTextColor(1.0, 0.3, 0.3)
+            end
+            recvT:SetText(tostring(attCtx.recvThisLockout))
+
             -- Column: in-raid indicator
             local raidT = row:CreateFontString(nil, "OVERLAY")
             raidT:SetFont("Fonts\\FRIZQT__.TTF", 9, "OUTLINE")
-            raidT:SetPoint("LEFT", 260, 0)
+            raidT:SetPoint("LEFT", 295, 0)
             if isPresent then
                 raidT:SetTextColor(0.3, 1.0, 0.3)
                 raidT:SetText("IN RAID")
@@ -1553,7 +1755,7 @@ function LootMaster:ShowRollFrame()
     end
 
     local f = CreateFrame("Frame", "BRutusMLRollFrame", UIParent, "BackdropTemplate")
-    f:SetSize(420, 350)
+    f:SetSize(520, 350)
     f:SetPoint("CENTER", UIParent, "CENTER", 200, 0)
     f:SetBackdrop({
         bgFile   = "Interface\\Buttons\\WHITE8x8",
@@ -1598,7 +1800,7 @@ function LootMaster:ShowRollFrame()
     sep:SetVertexColor(C.border.r, C.border.g, C.border.b, 0.4)
 
     -- Column headers
-    local headers = { { "Player", 10 }, { "Type", 200 }, { "Roll", 260 }, { "TMB", 320 } }
+    local headers = { { "Player", 6 }, { "Type", 145 }, { "Roll", 195 }, { "TMB", 245 }, { "ATT%", 325 }, { "RECV", 375 } }
     for _, h in ipairs(headers) do
         local ht = f:CreateFontString(nil, "OVERLAY")
         ht:SetFont("Fonts\\FRIZQT__.TTF", 9, "OUTLINE")
@@ -1613,7 +1815,7 @@ function LootMaster:ShowRollFrame()
     scrollFrame:SetPoint("BOTTOMRIGHT", -10, 50)
     UI:SkinScrollBar(scrollFrame, "BRutusRollScroll")
     local scrollContent = CreateFrame("Frame", nil, scrollFrame)
-    scrollContent:SetSize(380, 1)
+    scrollContent:SetSize(480, 1)
     scrollFrame:SetScrollChild(scrollContent)
     f.scrollContent = scrollContent
 
@@ -1631,6 +1833,42 @@ function LootMaster:ShowRollFrame()
         LootMaster:EndRolling()
     end)
     f.endBtn = endBtn
+
+    -- Roll buttons for the initiator (ML can also compete for the item)
+    -- OS button (right-most)
+    local osRollBtn = UI:CreateButton(f, "OS", 64, 24)
+    osRollBtn:SetPoint("BOTTOMRIGHT", -10, 12)
+    osRollBtn:SetBackdropColor(0.3, 0.3, 0.0, 0.6)
+    osRollBtn:SetScript("OnClick", function()
+        RandomRoll(1, 99)   -- /roll 1-99 = OS; captured by ProcessSystemRoll
+    end)
+    osRollBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:SetText("Roll Off-Spec\n|cff888888/roll 1-99|r", 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    osRollBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    -- MS button (left of OS)
+    local msRollBtn = UI:CreateButton(f, "MS", 64, 24)
+    msRollBtn:SetPoint("RIGHT", osRollBtn, "LEFT", -4, 0)
+    msRollBtn:SetBackdropColor(0.0, 0.35, 0.0, 0.6)
+    msRollBtn:SetScript("OnClick", function()
+        RandomRoll(1, 100)  -- /roll 1-100 = MS; captured by ProcessSystemRoll
+    end)
+    msRollBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:SetText("Roll Main Spec\n|cff888888/roll 1-100|r", 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    msRollBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    -- Roll label
+    local rollLabel = f:CreateFontString(nil, "OVERLAY")
+    rollLabel:SetFont("Fonts\\FRIZQT__.TTF", 8, "OUTLINE")
+    rollLabel:SetPoint("BOTTOM", msRollBtn, "TOP", 32, 2)
+    rollLabel:SetTextColor(C.silver.r, C.silver.g, C.silver.b)
+    rollLabel:SetText("Your roll:")
 
     -- Close
     local closeBtn = UI:CreateCloseButton(f)
@@ -1691,7 +1929,7 @@ function LootMaster:RefreshRollFrame()
     local yOff = 0
     for _, r in ipairs(sorted) do
         local row = CreateFrame("Button", nil, content, "BackdropTemplate")
-        row:SetSize(380, 22)
+        row:SetSize(480, 22)
         row:SetPoint("TOPLEFT", 0, -yOff)
         row:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
         row:SetBackdropColor(0.08, 0.06, 0.14, 0.6)
@@ -1707,7 +1945,7 @@ function LootMaster:RefreshRollFrame()
         -- Roll type
         local typeText = row:CreateFontString(nil, "OVERLAY")
         typeText:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
-        typeText:SetPoint("LEFT", 190, 0)
+        typeText:SetPoint("LEFT", 150, 0)
         if r.rollType == "MS" then
             typeText:SetTextColor(0.3, 1.0, 0.3)
         elseif r.rollType == "OS" then
@@ -1720,14 +1958,14 @@ function LootMaster:RefreshRollFrame()
         -- Roll number
         local rollText = row:CreateFontString(nil, "OVERLAY")
         rollText:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
-        rollText:SetPoint("LEFT", 250, 0)
+        rollText:SetPoint("LEFT", 200, 0)
         rollText:SetTextColor(1, 1, 1)
         rollText:SetText(r.rollType ~= "PASS" and tostring(r.roll) or "-")
 
         -- TMB info
         local tmbText = row:CreateFontString(nil, "OVERLAY")
         tmbText:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
-        tmbText:SetPoint("LEFT", 310, 0)
+        tmbText:SetPoint("LEFT", 250, 0)
         if r.tmb then
             local tc = r.tmb.type == "prio" and "|cffFF8000" or "|cff4CB8FF"
             tmbText:SetText(tc .. r.tmb.type .. " #" .. r.tmb.order .. "|r")
@@ -1735,6 +1973,38 @@ function LootMaster:RefreshRollFrame()
             tmbText:SetTextColor(0.4, 0.4, 0.4)
             tmbText:SetText("-")
         end
+
+        -- ATT% (25-man attendance)
+        local attText = row:CreateFontString(nil, "OVERLAY")
+        attText:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
+        attText:SetPoint("LEFT", 330, 0)
+        attText:SetWidth(42)
+        attText:SetJustifyH("RIGHT")
+        local att25 = r.att25 or 0
+        if att25 >= 60 then
+            attText:SetTextColor(0.3, 1.0, 0.3)
+        elseif att25 >= 40 then
+            attText:SetTextColor(1.0, 1.0, 0.3)
+        else
+            attText:SetTextColor(1.0, 0.3, 0.3)
+        end
+        attText:SetText(att25 .. "%")
+
+        -- RECV (items received this lockout)
+        local recvText = row:CreateFontString(nil, "OVERLAY")
+        recvText:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
+        recvText:SetPoint("LEFT", 378, 0)
+        recvText:SetWidth(32)
+        recvText:SetJustifyH("CENTER")
+        local recvN = r.recvCount or 0
+        if recvN == 0 then
+            recvText:SetTextColor(0.4, 0.4, 0.4)
+        elseif recvN == 1 then
+            recvText:SetTextColor(1.0, 1.0, 0.3)
+        else
+            recvText:SetTextColor(1.0, 0.3, 0.3)
+        end
+        recvText:SetText(tostring(recvN))
 
         -- Award button (only when rolling ended and ML)
         if self.activeLoot and self.activeLoot.ended and self:IsMasterLooter() and r.rollType ~= "PASS" then

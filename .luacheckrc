@@ -176,6 +176,8 @@ read_globals = {
     "GetLootSlotLink",
     "GiveMasterLoot",
     "GetMasterLootCandidate",
+    "RandomRoll",           -- /roll command API
+    "RANDOM_ROLL_RESULT",   -- localized roll result string (for pattern building)
 
     -- WoW API: Containers & Trade
     "C_Container",

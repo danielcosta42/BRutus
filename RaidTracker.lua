@@ -49,7 +49,19 @@ RaidTracker.PENALTIES = {
     LEFT_EARLY = 10,  -- absent from last snapshot
     NO_CONSUMES = 10, -- no consumables during raid
 }
--- Max score per session = 100, penalties subtract from it
+-- Max score per lockout = 100, penalties subtract from it
+
+-- TBC weekly reset epoch: 2006-01-03 00:00 UTC (a known Tuesday)
+local TUESDAY_EPOCH = 1136246400
+local WEEK_SECS     = 7 * 86400
+
+----------------------------------------------------------------------
+-- Returns the TBC reset week number for a given server timestamp.
+-- Week boundaries fall on Tuesday 00:00 UTC.
+----------------------------------------------------------------------
+function RaidTracker:GetWeekNum(timestamp)
+    return math.floor(((timestamp or 0) - TUESDAY_EPOCH) / WEEK_SECS)
+end
 
 function RaidTracker:Initialize()
     if not BRutus.db.raidTracker then
@@ -215,7 +227,8 @@ function RaidTracker:EndSession()
     -- Only count attendance if this was a guild raid (≥50% guild members)
     if self:IsGuildRaid(self.currentRaid) then
         self.currentRaid.isGuildRaid = true
-        self:UpdateAttendanceRecords(self.currentRaid)
+        -- Rebuild from scratch so lockout-dedup logic always applies
+        self:RebuildAttendanceFromSessions()
     else
         self.currentRaid.isGuildRaid = false
         BRutus:Print("|cffFF9900Raid ended — less than 50% guild members, attendance not counted.|r")
@@ -345,64 +358,6 @@ function RaidTracker:OnEncounterEnd(encounterID, encounterName, success)
     BRutus:Print(encounterName .. " - " .. status)
 end
 
-function RaidTracker:UpdateAttendanceRecords(session)
-    local att = BRutus.db.raidTracker.attendance
-    local snapshots = session.snapshots or {}
-    local firstSnap = snapshots[1]
-    local lastSnap = snapshots[#snapshots]
-
-    for playerKey in pairs(session.players) do
-        if not att[playerKey] then
-            att[playerKey] = { raids = 0, lastRaid = 0, totalScore = 0 }
-        end
-        -- Migrate old records that lack totalScore
-        if not att[playerKey].totalScore then
-            att[playerKey].totalScore = att[playerKey].raids * 100
-        end
-
-        att[playerKey].raids = att[playerKey].raids + 1
-        att[playerKey].lastRaid = session.startTime
-
-        -- Start at 100, apply penalties
-        local score = 100
-
-        -- LATE: player was NOT in the first snapshot
-        if firstSnap and firstSnap.members and not firstSnap.members[playerKey] then
-            score = score - self.PENALTIES.LATE
-        end
-
-        -- LEFT EARLY: player was NOT in the last snapshot
-        if lastSnap and lastSnap.members and not lastSnap.members[playerKey] then
-            score = score - self.PENALTIES.LEFT_EARLY
-        end
-
-        -- NO CONSUMABLES: check if player had consumes in the majority of snapshots
-        local consumeChecks = 0
-        local consumeHits = 0
-        for _, snap in ipairs(snapshots) do
-            if snap.members and snap.members[playerKey] then
-                consumeChecks = consumeChecks + 1
-                if snap.members[playerKey].hasConsumes then
-                    consumeHits = consumeHits + 1
-                end
-            end
-        end
-        -- Penalize if less than 50% of snapshots had consumables
-        if consumeChecks > 0 and (consumeHits / consumeChecks) < 0.5 then
-            score = score - self.PENALTIES.NO_CONSUMES
-        end
-
-        score = math.max(0, math.min(100, score))
-        att[playerKey].totalScore = att[playerKey].totalScore + score
-
-        -- Track 25-man raids separately for attendance accounting
-        if self:Is25Man(session.instanceID) then
-            att[playerKey].raids25      = (att[playerKey].raids25 or 0) + 1
-            att[playerKey].totalScore25 = (att[playerKey].totalScore25 or 0) + score
-        end
-    end
-end
-
 function RaidTracker:GetAttendance(playerKey)
     local att = BRutus.db.raidTracker.attendance
     if att and att[playerKey] then
@@ -412,20 +367,30 @@ function RaidTracker:GetAttendance(playerKey)
 end
 
 function RaidTracker:GetTotalSessions()
-    local count = 0
-    for _ in pairs(BRutus.db.raidTracker.sessions) do
-        count = count + 1
+    -- Count unique guild-raid lockouts (instance + reset week), not raw sessions.
+    local seen = {}
+    for _, session in pairs(BRutus.db.raidTracker.sessions) do
+        if session.isGuildRaid then
+            local key = (session.instanceID or 0) .. "_" .. self:GetWeekNum(session.startTime or 0)
+            seen[key] = true
+        end
     end
+    local count = 0
+    for _ in pairs(seen) do count = count + 1 end
     return count
 end
 
 function RaidTracker:GetTotal25ManSessions()
-    local count = 0
+    -- Count unique 25-man guild-raid lockouts (instance + reset week).
+    local seen = {}
     for _, session in pairs(BRutus.db.raidTracker.sessions) do
-        if self:Is25Man(session.instanceID) then
-            count = count + 1
+        if session.isGuildRaid and self:Is25Man(session.instanceID) then
+            local key = session.instanceID .. "_" .. self:GetWeekNum(session.startTime or 0)
+            seen[key] = true
         end
     end
+    local count = 0
+    for _ in pairs(seen) do count = count + 1 end
     return count
 end
 
@@ -588,13 +553,104 @@ function RaidTracker:MergeDuplicateSessions()
 end
 
 ----------------------------------------------------------------------
--- Rebuild attendance table from scratch using saved sessions
+-- Rebuild attendance table from scratch using saved sessions.
+-- Sessions are grouped by lockout (instanceID + reset week) so that
+-- multiple sessions in the same raid week count as ONE attendance event.
 ----------------------------------------------------------------------
 function RaidTracker:RebuildAttendanceFromSessions()
     BRutus.db.raidTracker.attendance = {}
+
+    -- Group guild-raid sessions by lockout key
+    local lockouts = {}
+    local lockoutOrder = {}
     for _, session in pairs(BRutus.db.raidTracker.sessions) do
         if session.isGuildRaid then
-            self:UpdateAttendanceRecords(session)
+            local weekNum    = self:GetWeekNum(session.startTime or 0)
+            local lockoutKey = (session.instanceID or 0) .. "_" .. weekNum
+            if not lockouts[lockoutKey] then
+                lockouts[lockoutKey] = {
+                    instanceID = session.instanceID,
+                    sessions   = {},
+                }
+                table.insert(lockoutOrder, lockoutKey)
+            end
+            table.insert(lockouts[lockoutKey].sessions, session)
+        end
+    end
+
+    for _, key in ipairs(lockoutOrder) do
+        self:UpdateAttendanceForLockout(lockouts[key])
+    end
+end
+
+----------------------------------------------------------------------
+-- Compute attendance for ONE lockout (one raid per reset week).
+-- All sessions in the lockout are merged; each player is counted once.
+----------------------------------------------------------------------
+function RaidTracker:UpdateAttendanceForLockout(lockout)
+    local att        = BRutus.db.raidTracker.attendance
+    local instanceID = lockout.instanceID
+
+    -- Merge players and snapshots from every session in this lockout
+    local allPlayers   = {}
+    local allSnapshots = {}
+    local lastRaid     = 0
+
+    for _, session in ipairs(lockout.sessions) do
+        for playerKey in pairs(session.players or {}) do
+            allPlayers[playerKey] = true
+        end
+        for _, snap in ipairs(session.snapshots or {}) do
+            table.insert(allSnapshots, snap)
+        end
+        if (session.startTime or 0) > lastRaid then
+            lastRaid = session.startTime or 0
+        end
+    end
+
+    -- Sort merged snapshots chronologically
+    table.sort(allSnapshots, function(a, b) return (a.time or 0) < (b.time or 0) end)
+
+    local firstSnap = allSnapshots[1]
+    local lastSnap  = allSnapshots[#allSnapshots]
+
+    for playerKey in pairs(allPlayers) do
+        if not att[playerKey] then
+            att[playerKey] = { raids = 0, lastRaid = 0, totalScore = 0 }
+        end
+        if not att[playerKey].totalScore then
+            att[playerKey].totalScore = att[playerKey].raids * 100
+        end
+
+        att[playerKey].raids   = att[playerKey].raids + 1
+        att[playerKey].lastRaid = math.max(att[playerKey].lastRaid, lastRaid)
+
+        -- Score: start at 100, apply penalties across merged snapshot span
+        local score = 100
+        if firstSnap and firstSnap.members and not firstSnap.members[playerKey] then
+            score = score - self.PENALTIES.LATE
+        end
+        if lastSnap and lastSnap.members and not lastSnap.members[playerKey] then
+            score = score - self.PENALTIES.LEFT_EARLY
+        end
+        local consumeChecks, consumeHits = 0, 0
+        for _, snap in ipairs(allSnapshots) do
+            if snap.members and snap.members[playerKey] then
+                consumeChecks = consumeChecks + 1
+                if snap.members[playerKey].hasConsumes then
+                    consumeHits = consumeHits + 1
+                end
+            end
+        end
+        if consumeChecks > 0 and (consumeHits / consumeChecks) < 0.5 then
+            score = score - self.PENALTIES.NO_CONSUMES
+        end
+        score = math.max(0, math.min(100, score))
+        att[playerKey].totalScore = att[playerKey].totalScore + score
+
+        if self:Is25Man(instanceID) then
+            att[playerKey].raids25      = (att[playerKey].raids25 or 0) + 1
+            att[playerKey].totalScore25 = (att[playerKey].totalScore25 or 0) + score
         end
     end
 end

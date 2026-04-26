@@ -362,7 +362,7 @@ end
 ----------------------------------------------------------------------
 -- Record a loot award as "received" in local TMB data
 ----------------------------------------------------------------------
-function TMB:RecordReceived(charName, itemId, itemLink)
+function TMB:RecordReceived(charName, itemId, itemLink, instanceID, weekNum)
     if not BRutus.db.tmb or not BRutus.db.tmb.data then return end
     local key = strlower(charName)
 
@@ -385,11 +385,13 @@ function TMB:RecordReceived(charName, itemId, itemLink)
 
     local receivedAt = date("%Y-%m-%d %H:%M:%S")
     table.insert(charData.received, {
-        itemId     = itemId,
-        itemLink   = itemLink or "",
-        order      = 999,
-        receivedAt = receivedAt,
-        sessionAward = true,   -- flag: recorded by BRutus this session
+        itemId       = itemId,
+        itemLink     = itemLink or "",
+        order        = 999,
+        receivedAt   = receivedAt,
+        sessionAward = true,        -- flag: recorded by BRutus this session
+        instanceID   = instanceID,  -- lockout: instance for this award
+        weekNum      = weekNum,     -- lockout: TBC reset week for this award
     })
 
     -- Remove from prio/wishlist (item has been received)
@@ -422,6 +424,25 @@ function TMB:RemoveReceived(charName, itemId)
         end
     end
     self:RebuildItemIndex()
+end
+
+----------------------------------------------------------------------
+-- Count items received by a character during the given raid lockout.
+-- instanceID + weekNum together identify the specific instance reset.
+----------------------------------------------------------------------
+function TMB:GetReceivedThisLockout(charName, instanceID, weekNum)
+    if not BRutus.db.tmb or not BRutus.db.tmb.data then return 0 end
+    if not instanceID or not weekNum then return 0 end
+    local key = strlower(charName)
+    local charData = BRutus.db.tmb.data[key]
+    if not charData or not charData.received then return 0 end
+    local count = 0
+    for _, r in ipairs(charData.received) do
+        if r.instanceID == instanceID and r.weekNum == weekNum then
+            count = count + 1
+        end
+    end
+    return count
 end
 
 ----------------------------------------------------------------------
