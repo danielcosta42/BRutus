@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.22.0] - 2026-04-26
+
+### Added
+- add zone column to roster UI and update frame width
+
+### Fixed
+- correct registration of Mining profession to include the correct parameters
+
+### Other
+- Refactor attendance tracking and loot distribution features
+
+
 ## [1.21.0] - 2026-04-25
 
 ### Added
