@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.26.0] - 2026-04-26
+
+### Added
+- add RAID_DELETE message type and officer verification for raid session deletion
+
+
 ## [1.25.1] - 2026-04-26
 
 ### Fixed
