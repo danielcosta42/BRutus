@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.33.0] - 2026-04-26
+
+### Added
+- add GetItemCount to read_globals for enhanced item tracking
+- update attunement tracking logic and clarify account-wide limitations
+- add attunement status and debug commands to chat interface
+
+
 ## [1.32.0] - 2026-04-26
 
 ### Added
