@@ -346,12 +346,19 @@ end
 function RaidTracker:OnEncounterStart(encounterID, encounterName)
     if not self.currentRaid then return end
     self:TakeSnapshot("encounter_start")
+    -- Guard: ignore duplicate ENCOUNTER_START for the same fight (can fire twice
+    -- on some TBC bosses such as Magtheridon due to phase transitions).
+    for _, enc in ipairs(self.currentRaid.encounters) do
+        if enc.id == encounterID and enc.endTime == nil then
+            return  -- already tracking this encounter
+        end
+    end
     table.insert(self.currentRaid.encounters, {
-        id = encounterID,
-        name = encounterName,
+        id        = encounterID,
+        name      = encounterName,
         startTime = GetServerTime(),
-        endTime = nil,
-        success = nil,
+        endTime   = nil,
+        success   = nil,
     })
 end
 
@@ -516,7 +523,37 @@ function RaidTracker:MergeDuplicateSessions()
     if not sessions then return 0 end
 
     local MERGE_WINDOW = 1800  -- 30 min: covers wipe→run-back; separates distinct raid attempts
+    local ENC_PROX    = 300   -- 5 min proximity = same encounter event
     local totalMerged = 0
+
+    -- Helper: dedup an encounter list in-place (collect+sort+adjacent-dedup).
+    -- Fixes any duplicates already present in a single session's data.
+    local function deduplicateEncounters(encounters)
+        if not encounters or #encounters <= 1 then return encounters end
+        table.sort(encounters, function(x, y) return (x.startTime or 0) < (y.startTime or 0) end)
+        local result = {}
+        for _, enc in ipairs(encounters) do
+            local isDup = false
+            local encT  = enc.startTime or 0
+            for i = #result, 1, -1 do
+                local prev = result[i]
+                if encT - (prev.startTime or 0) > ENC_PROX then break end
+                if prev.id == enc.id and prev.success == enc.success then
+                    isDup = true; break
+                end
+            end
+            if not isDup then tinsert(result, enc) end
+        end
+        return result
+    end
+
+    -- First pass: clean up duplicate encounters within each existing session
+    -- (repairs data corrupted by previous ENCOUNTER_START double-fires or bad merges).
+    for _, s in pairs(sessions) do
+        if s and s.encounters and #s.encounters > 1 then
+            s.encounters = deduplicateEncounters(s.encounters)
+        end
+    end
 
     -- Group sessions by instanceID AND groupTag (don't merge sessions from different groups)
     local byInstance = {}
@@ -572,33 +609,35 @@ function RaidTracker:MergeDuplicateSessions()
                         if not b.data.snapshots then b.data.snapshots = {} end
 
                         -- Merge encounters.
-                        -- Two clients in the same raid record the same boss fight
-                        -- independently; their startTimes can differ by a few seconds.
-                        -- Dedup key: same encounterID + same outcome (success/wipe/nil)
-                        -- within a 5-minute proximity window.
-                        local ENC_PROX = 300  -- seconds
-                        local function encMatchesExisting(enc, encList)
-                            for _, e in ipairs(encList) do
-                                if e.id == enc.id
-                                    and e.success == enc.success
-                                    and math.abs((e.startTime or 0) - (enc.startTime or 0)) <= ENC_PROX
-                                then
-                                    return true
-                                end
-                            end
-                            return false
-                        end
-
+                        -- Collect all encounters from both sessions, sort by startTime,
+                        -- then single-pass dedup: skip if a previous kept encounter has
+                        -- the same (encounterID, success) within ENC_PROX seconds.
+                        -- This avoids the mutation-while-iterating bug of the old approach
+                        -- and correctly handles nil startTimes and multi-wipe scenarios.
                         if not a.data.encounters then a.data.encounters = {} end
                         if not b.data.encounters then b.data.encounters = {} end
-                        for _, enc in ipairs(b.data.encounters) do
-                            if not encMatchesExisting(enc, a.data.encounters) then
-                                table.insert(a.data.encounters, enc)
-                            end
-                        end
-                        table.sort(a.data.encounters, function(x, y)
+
+                        local allEncs = {}
+                        for _, e in ipairs(a.data.encounters) do tinsert(allEncs, e) end
+                        for _, e in ipairs(b.data.encounters) do tinsert(allEncs, e) end
+                        table.sort(allEncs, function(x, y)
                             return (x.startTime or 0) < (y.startTime or 0)
                         end)
+
+                        local dedupedEncs = {}
+                        for _, enc in ipairs(allEncs) do
+                            local isDup = false
+                            local encT  = enc.startTime or 0
+                            for i = #dedupedEncs, 1, -1 do
+                                local prev = dedupedEncs[i]
+                                if encT - (prev.startTime or 0) > ENC_PROX then break end
+                                if prev.id == enc.id and prev.success == enc.success then
+                                    isDup = true; break
+                                end
+                            end
+                            if not isDup then tinsert(dedupedEncs, enc) end
+                        end
+                        a.data.encounters = dedupedEncs
 
                         -- Merge snapshots
                         for _, snap in ipairs(b.data.snapshots) do
