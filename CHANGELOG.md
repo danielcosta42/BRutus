@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.29.0] - 2026-04-26
+
+### Added
+- debounce wishlist panel updates on item info received to improve performance
+
+
 ## [1.28.0] - 2026-04-26
 
 ### Added
