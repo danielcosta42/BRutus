@@ -1828,6 +1828,23 @@ function BRutus:CreateWishlistGuildPanel(parent, _mainFrame)
         PopulateWishlistPanel(self:GetText())
     end)
 
+    -- Re-render when the client finishes loading a queued item (async cache population).
+    -- Debounce: batch rapid arrivals into a single repopulate 0.3 s later.
+    parent:RegisterEvent("GET_ITEM_INFO_RECEIVED")
+    parent:SetScript("OnEvent", function(self, event)
+        if event == "GET_ITEM_INFO_RECEIVED" and self:IsVisible() then
+            if not self._itemInfoTimer then
+                self._itemInfoTimer = true
+                C_Timer.After(0.3, function()
+                    self._itemInfoTimer = nil
+                    if parent:IsVisible() then
+                        PopulateWishlistPanel(wishSearch:GetText())
+                    end
+                end)
+            end
+        end
+    end)
+
     parent:SetScript("OnShow", function()
         PopulateWishlistPanel(wishSearch:GetText())
     end)

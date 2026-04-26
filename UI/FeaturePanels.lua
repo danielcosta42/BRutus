@@ -1656,7 +1656,15 @@ local function BuildWishlistFrame()
     f:RegisterEvent("GET_ITEM_INFO_RECEIVED")
     f:SetScript("OnEvent", function(self, event)
         if event == "GET_ITEM_INFO_RECEIVED" and self:IsShown() then
-            BRutus:RefreshWishlistFrame()
+            if not self._itemInfoTimer then
+                self._itemInfoTimer = true
+                C_Timer.After(0.3, function()
+                    self._itemInfoTimer = nil
+                    if f:IsShown() then
+                        BRutus:RefreshWishlistFrame()
+                    end
+                end)
+            end
         end
     end)
 

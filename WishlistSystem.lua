@@ -88,6 +88,8 @@ function Wishlist:RebuildItemIndex()
             local cc   = charData.class or ""
             local name = charData.name  or ""
             for _, item in ipairs(charData.wishlist or {}) do
+                -- Skip malformed entries (e.g. old TMB-era data lacking itemId)
+                if item.itemId then
                 if not index[item.itemId] then index[item.itemId] = {} end
                 table.insert(index[item.itemId], {
                     name      = name,
@@ -96,6 +98,7 @@ function Wishlist:RebuildItemIndex()
                     order     = item.order,
                     isOffspec = item.isOffspec,
                 })
+                end  -- end itemId guard
             end
         end
     end
@@ -129,11 +132,13 @@ end
 -- Item metadata helpers
 ----------------------------------------------------------------------
 function Wishlist:GetItemName(itemId)
+    if not itemId then return "Item #?" end
     local name = GetItemInfo(itemId)
     return name or ("Item #" .. itemId)
 end
 
 function Wishlist:GetItemQuality(itemId)
+    if not itemId then return 1 end
     local _, _, quality = GetItemInfo(itemId)
     return quality or 1
 end
@@ -253,6 +258,9 @@ end
 ----------------------------------------------------------------------
 function Wishlist:BroadcastMyWishlist()
     if not BRutus.db or not BRutus.db.myWishlist then return end
+    -- Do not broadcast (or store) an empty list — would create a ghost entry in every
+    -- guildie's panel showing the character with 0 items.
+    if #BRutus.db.myWishlist == 0 then return end
 
     local myName  = UnitName("player")
     local myClass = select(2, UnitClass("player")) or ""
