@@ -506,7 +506,72 @@ SlashCmdList["BRUTUS"] = function(msg)
         end    elseif msg == "specs" then
         if BRutus.SpecChecker then
             BRutus.SpecChecker:ScanGroup()
-        end    else
+        end
+    elseif msg == "attune" or msg == "attunements" then
+        -- Print attunement status for the logged-in character to chat.
+        if BRutus.AttunementTracker then
+            local atts = BRutus.AttunementTracker:ScanAttunements()
+            BRutus:Print("|cffFFD700Attunements:|r")
+            for _, att in ipairs(atts) do
+                if not att.alwaysComplete then
+                    local status
+                    if att.complete then
+                        status = "|cff00FF00Done|r"
+                    elseif att.progress and att.progress > 0 then
+                        status = format("|cffFFD700%d%%|r", math.floor(att.progress * 100))
+                    else
+                        status = "|cffFF4444Not started|r"
+                    end
+                    BRutus:Print(format("  [%s] %s — %s", att.tier, att.name, status))
+                end
+            end
+        end
+    elseif msg == "attune debug" or msg == "attunements debug" then
+        -- Debug mode: prints per-quest IsQuestFlaggedCompleted results.
+        if BRutus.AttunementTracker then
+            BRutus:Print("|cffFFD700Attunement debug (per quest):|r")
+            for _, attDef in ipairs(BRutus.AttunementTracker.ATTUNEMENTS) do
+                if not attDef.alwaysComplete and attDef.finalQuestId then
+                    BRutus:Print(format("|cffAAAAAA--- %s (final=%d) ---|r", attDef.name, attDef.finalQuestId))
+                    for _, q in ipairs(attDef.quests) do
+                        local done = BRutus.AttunementTracker:IsQuestComplete(q.id)
+                        local col = done and "|cff00FF00" or "|cffFF4444"
+                        BRutus:Print(format("  %s[%d] %s|r", col, q.id, q.name))
+                    end
+                    if attDef.keyItemId then
+                        local count = GetItemCount(attDef.keyItemId) or 0
+                        local col = count > 0 and "|cff00FF00" or "|cffFF4444"
+                        BRutus:Print(format("  %sKey item %d: %d in bags|r", col, attDef.keyItemId, count))
+                    end
+                end
+            end
+        end
+    elseif msg == "attune dumpquests" then
+        -- Dumps all completed quest IDs in the TBC attunement range.
+        -- Covers T4/T5/T6 + some headroom for anniversary-specific hidden flags.
+        BRutus:Print("|cffFFD700Completed quests in range 9800-11500:|r")
+        local found = 0
+        for qid = 9800, 11500 do
+            if BRutus.AttunementTracker:IsQuestComplete(qid) then
+                -- Try to get the quest title (may be nil for hidden server-side quests)
+                local title = nil
+                if C_QuestLog and C_QuestLog.GetTitleForQuestID then
+                    title = C_QuestLog.GetTitleForQuestID(qid)
+                end
+                if title and title ~= "" then
+                    BRutus:Print(format("  |cff00FF00[%d]|r %s", qid, title))
+                else
+                    BRutus:Print(format("  |cff00FF00[%d]|r |cffAAAAAA(no title — hidden/anniversary quest)|r", qid))
+                end
+                found = found + 1
+            end
+        end
+        if found == 0 then
+            BRutus:Print("|cffFF4444No completed quests found in that range.|r")
+        else
+            BRutus:Print(format("|cffAAAAAA%d quests found. Run on main to compare IDs.|r", found))
+        end
+    else
         BRutus:ToggleRoster()
     end
 end
