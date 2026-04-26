@@ -567,21 +567,32 @@ function RaidTracker:MergeDuplicateSessions()
                         end
 
                         -- Normalise nil fields on old DB records
-                        if not a.data.encounters then a.data.encounters = {} end
-                        if not a.data.snapshots  then a.data.snapshots  = {} end
-                        if not b.data.encounters then b.data.encounters = {} end
-                        if not b.data.snapshots  then b.data.snapshots  = {} end
+                        if not a.data.snapshots then a.data.snapshots = {} end
+                        if not b.data.snapshots then b.data.snapshots = {} end
 
-                        -- Merge encounters (deduplicate by id + startTime)
-                        local encSeen = {}
-                        for _, enc in ipairs(a.data.encounters) do
-                            encSeen[enc.id .. "_" .. (enc.startTime or 0)] = true
+                        -- Merge encounters.
+                        -- Two clients in the same raid record the same boss fight
+                        -- independently; their startTimes can differ by a few seconds.
+                        -- Dedup key: same encounterID + same outcome (success/wipe/nil)
+                        -- within a 5-minute proximity window.
+                        local ENC_PROX = 300  -- seconds
+                        local function encMatchesExisting(enc, list)
+                            for _, e in ipairs(list) do
+                                if e.id == enc.id
+                                    and e.success == enc.success
+                                    and math.abs((e.startTime or 0) - (enc.startTime or 0)) <= ENC_PROX
+                                then
+                                    return true
+                                end
+                            end
+                            return false
                         end
+
+                        if not a.data.encounters then a.data.encounters = {} end
+                        if not b.data.encounters then b.data.encounters = {} end
                         for _, enc in ipairs(b.data.encounters) do
-                            local ekey = enc.id .. "_" .. (enc.startTime or 0)
-                            if not encSeen[ekey] then
+                            if not encMatchesExisting(enc, a.data.encounters) then
                                 table.insert(a.data.encounters, enc)
-                                encSeen[ekey] = true
                             end
                         end
                         table.sort(a.data.encounters, function(x, y)
