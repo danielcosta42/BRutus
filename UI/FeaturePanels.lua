@@ -2088,10 +2088,25 @@ function BRutus:RefreshWishlistFrame()
     local f = self.WishlistFrame
     if not f then return end
 
-    local list = (BRutus.db and BRutus.db.myWishlist) or {}
-    local total = #list
+    local rawList = (BRutus.db and BRutus.db.myWishlist) or {}
 
-    f.counterText:SetText(total .. "/50")
+    -- Split into active and delivered; delivered entries appear at the bottom.
+    local active    = {}
+    local delivered = {}
+    for _, entry in ipairs(rawList) do
+        local isDelivered = BRutus.Wishlist and BRutus.Wishlist:IsItemDelivered(entry.itemId)
+        if isDelivered then
+            table.insert(delivered, entry)
+        else
+            table.insert(active, entry)
+        end
+    end
+    local list = {}
+    for _, e in ipairs(active)    do table.insert(list, { entry = e, delivered = false }) end
+    for _, e in ipairs(delivered) do table.insert(list, { entry = e, delivered = true  }) end
+
+    local total = #list
+    f.counterText:SetText(#rawList .. "/50")
 
     local offset = FauxScrollFrame_GetOffset(f.scrollFrame)
     FauxScrollFrame_Update(f.scrollFrame, total, WISH_VISIBLE, WISH_ROW_HEIGHT)
@@ -2101,34 +2116,67 @@ function BRutus:RefreshWishlistFrame()
         local dataIdx = offset + i
 
         if dataIdx <= total then
-            local entry = list[dataIdx]
-            local bgColor = (i % 2 == 0) and C.row2 or C.row1
+            local item        = list[dataIdx]
+            local entry       = item.entry
+            local isDelivered = item.delivered
+
+            -- Background: delivered rows use a darker, muted colour
+            local bgColor
+            if isDelivered then
+                bgColor = { r=0.08, g=0.08, b=0.08, a=0.9 }
+            else
+                bgColor = (i % 2 == 0) and C.row2 or C.row1
+            end
             row.defaultBg = bgColor
             row:SetBackdropColor(bgColor.r, bgColor.g, bgColor.b, bgColor.a)
 
             row.itemId   = entry.itemId
             row.itemLink = entry.itemLink or ""
 
-            row.numText:SetText(entry.order or dataIdx)
-
-            -- Item display: always resolve via GetItemInfo for correct locale.
-            -- Fall back to stored link only if item not yet in client cache.
-            local localName, localLink = GetItemInfo(entry.itemId)
-            if localLink then
-                row.itemText:SetText(localLink)
-            elseif localName then
-                row.itemText:SetText(localName)
-            elseif entry.itemLink and entry.itemLink ~= "" then
-                row.itemText:SetText(entry.itemLink)
+            -- Order number: show "✓" for delivered items
+            if isDelivered then
+                row.numText:SetText("|cff44FF44✓|r")
             else
-                row.itemText:SetText("Item #" .. entry.itemId)
+                row.numText:SetText(entry.order or dataIdx)
             end
 
-            row.itemText:SetTextColor(C.white.r, C.white.g, C.white.b)
+            -- Item display
+            local localName, localLink = GetItemInfo(entry.itemId)
+            local displayText
+            if localLink then
+                displayText = localLink
+            elseif localName then
+                displayText = localName
+            elseif entry.itemLink and entry.itemLink ~= "" then
+                displayText = entry.itemLink
+            else
+                displayText = "Item #" .. entry.itemId
+            end
+            row.itemText:SetText(displayText)
+
+            -- Dim delivered item text
+            if isDelivered then
+                row.itemText:SetTextColor(0.45, 0.45, 0.45)
+            else
+                row.itemText:SetTextColor(C.white.r, C.white.g, C.white.b)
+            end
+
             if entry.isOffspec then
                 row.typeText:SetText("|cffAAAAAA  OS|r")
             else
                 row.typeText:SetText("|cff4CB5FF  MS|r")
+            end
+
+            -- Show/hide action buttons based on delivered state
+            for _, child in pairs({ row:GetChildren() }) do
+                local childType = child:GetObjectType()
+                if childType == "Button" or childType == "Frame" then
+                    if isDelivered then
+                        child:Hide()
+                    else
+                        child:Show()
+                    end
+                end
             end
 
             row:Show()

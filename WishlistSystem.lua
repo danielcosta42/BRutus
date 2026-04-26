@@ -185,8 +185,32 @@ function Wishlist:AddToWishlist(itemId, itemLink, isOffspec)
 end
 
 -- Remove an item from the player's own wishlist by itemId.
+-- Returns true if the local player has received this item via master-loot.
+function Wishlist:IsItemDelivered(itemId)
+    local history = BRutus.db and BRutus.db.lootHistory
+    if not history then return false end
+    local myName = UnitName("player")
+    local realm  = GetRealmName() or ""
+    local myKey  = myName .. "-" .. realm
+    for _, entry in ipairs(history) do
+        if entry.fromML and entry.playerKey == myKey then
+            -- Match by itemId stored in entry, or extract from itemLink
+            local entryId = entry.itemId
+            if not entryId and entry.itemLink then
+                entryId = tonumber(entry.itemLink:match("item:(%d+)"))
+            end
+            if entryId == itemId then return true end
+        end
+    end
+    return false
+end
+
 function Wishlist:RemoveFromWishlist(itemId)
     if not BRutus.db or not BRutus.db.myWishlist then return end
+    if self:IsItemDelivered(itemId) then
+        BRutus:Print("|cffFF4444[Wishlist]|r Este item já foi entregue e não pode ser removido.")
+        return
+    end
     local list = BRutus.db.myWishlist
     for i = #list, 1, -1 do
         if list[i].itemId == itemId then
@@ -207,6 +231,7 @@ end
 -- Move an item up (-1) or down (+1) in the wishlist order.
 function Wishlist:ReorderWishlist(itemId, direction)
     if not BRutus.db or not BRutus.db.myWishlist then return end
+    if self:IsItemDelivered(itemId) then return end
     local list = BRutus.db.myWishlist
     local idx
     for i, e in ipairs(list) do
