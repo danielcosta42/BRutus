@@ -1277,21 +1277,41 @@ function ShowRowTooltip(row)
     end
 
     -- Attunement detail
-    if data.attunements and #data.attunements > 0 then
-        GameTooltip:AddLine(" ")
-        GameTooltip:AddLine("Attunements:", C.gold.r, C.gold.g, C.gold.b)
-        for _, att in ipairs(data.attunements) do
-            local color
+    -- Uses GetEffectiveAttunements so only game-API-verified data is shown
+    -- (no alt-propagation that could produce false "Done" for cross-account alts).
+    local effAtts = BRutus.AttunementTracker:GetEffectiveAttunements(data.key)
+    if effAtts and #effAtts > 0 then
+        local done, inProg, pending = {}, {}, {}
+        for _, att in ipairs(effAtts) do
             if att.complete then
-                color = C.green
-            elseif att.progress > 0 then
-                color = C.gold
+                tinsert(done, att)
+            elseif att.progress and att.progress > 0 then
+                tinsert(inProg, att)
             else
-                color = C.red
+                tinsert(pending, att)
             end
-            local status = att.complete and "|cff00ff00Done|r" or string.format("%d%%", att.progress * 100)
-            GameTooltip:AddLine(string.format("  %s [%s]  %s", att.name, att.tier, status),
-                color.r, color.g, color.b)
+        end
+
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine(
+            string.format("Attunements: (%d/%d)", #done, #effAtts),
+            C.gold.r, C.gold.g, C.gold.b)
+
+        for _, att in ipairs(done) do
+            GameTooltip:AddLine(
+                string.format("  [%s] %s", att.tier, att.name) .. "  Done",
+                C.green.r, C.green.g, C.green.b)
+        end
+        for _, att in ipairs(inProg) do
+            GameTooltip:AddLine(
+                string.format("  [%s] %s  %d%%", att.tier, att.name,
+                    math.floor((att.progress or 0) * 100)),
+                C.gold.r, C.gold.g, C.gold.b)
+        end
+        for _, att in ipairs(pending) do
+            GameTooltip:AddLine(
+                string.format("  [%s] %s  Not started", att.tier, att.name),
+                C.red.r, C.red.g, C.red.b)
         end
     end
 
