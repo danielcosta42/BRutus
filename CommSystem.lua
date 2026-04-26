@@ -18,6 +18,7 @@ CommSystem.MSG_TYPES = {
     VERSION   = "VR",    -- Version check
     ALT_LINK  = "AL",    -- Alt/main link table sync (officer only)
     RAID_DATA = "RD",    -- Raid attendance + session sync (officer only)
+    RAID_DELETE = "RX",  -- Delete a raid session (officer only; sender verified)
     NOTES_ALL = "OA",    -- Bulk officer notes sync (officer only)
     WELCOME_CLAIM = "WC",-- Welcome message claimed for a member (officer only)
 }
@@ -209,6 +210,11 @@ function CommSystem:OnMessageReceived(msg, _, sender)
     elseif msgType == CommSystem.MSG_TYPES.RAID_DATA then
         if BRutus:IsOfficer() and BRutus.RaidTracker then
             BRutus.RaidTracker:HandleIncoming(data)
+        end
+    elseif msgType == CommSystem.MSG_TYPES.RAID_DELETE then
+        -- Only apply if the sender is a verified officer in the guild roster
+        if BRutus:IsOfficerByName(sender) and BRutus.RaidTracker then
+            BRutus.RaidTracker:HandleDeleteIncoming(data)
         end
     elseif msgType == CommSystem.MSG_TYPES.NOTES_ALL then
         if BRutus:IsOfficer() and BRutus.OfficerNotes then

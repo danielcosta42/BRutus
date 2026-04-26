@@ -579,6 +579,26 @@ function BRutus:IsOfficer()
     return rankIndex <= maxRank
 end
 
+-- Check whether a named player (may include realm, e.g. "Name-Realm") is an officer
+-- by scanning the guild roster. Used to validate incoming officer-only messages.
+function BRutus:IsOfficerByName(fullName)
+    if not IsInGuild() or not fullName then return false end
+    local maxRank = (self.db and self.db.settings and self.db.settings.officerMaxRank) or 2
+    -- Normalise: strip realm if present
+    local shortName = fullName:match("^([^-]+)") or fullName
+    local numMembers = GetNumGuildMembers() or 0
+    for i = 1, numMembers do
+        local name, _, rankIndex = GetGuildRosterInfo(i)
+        if name then
+            local memberShort = name:match("^([^-]+)") or name
+            if memberShort == shortName and rankIndex and rankIndex <= maxRank then
+                return true
+            end
+        end
+    end
+    return false
+end
+
 ----------------------------------------------------------------------
 -- Alt/Main linking (for account-wide attunement propagation)
 ----------------------------------------------------------------------

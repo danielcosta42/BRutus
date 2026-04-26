@@ -93,7 +93,16 @@ function BRutus:CreateRaidsPanel(parent, _mainFrame)
     filter25Btn:SetScript("OnClick",  function() SetFilterActive(true)  end)
 
     parent:SetScript("OnShow", function()
+        -- Store refs so remote deletions can refresh the panel
+        BRutus.RaidsPanelOpen = {
+            sessionContent = sessionContent,
+            attContent     = attContent,
+            statusText     = statusText,
+        }
         SetFilterActive(_raidFilter25)
+    end)
+    parent:SetScript("OnHide", function()
+        BRutus.RaidsPanelOpen = nil
     end)
 end
 

@@ -723,31 +723,62 @@ function RaidTracker:UpdateAttendanceForLockout(lockout)
 end
 
 function RaidTracker:DeleteSession(sessionID)
+    if not BRutus:IsOfficer() then
+        BRutus:Print("|cffFF4444Apenas officers podem deletar raids.|r")
+        return
+    end
+
     local session = BRutus.db.raidTracker.sessions[sessionID]
     if not session then return end
 
-    local groupTag = session.groupTag or ""
-    local att = BRutus.db.raidTracker.attendance or {}
-    local groupAtt = att[groupTag] or {}
-
-    for playerKey in pairs(session.players) do
-        local pAtt = groupAtt[playerKey]
-        if pAtt then
-            pAtt.raids = math.max(0, pAtt.raids - 1)
-            if pAtt.totalScore then
-                local avgScore = pAtt.raids > 0 and (pAtt.totalScore / (pAtt.raids + 1)) or 100
-                pAtt.totalScore = math.max(0, pAtt.totalScore - avgScore)
-            end
-            if self:Is25Man(session.instanceID) then
-                pAtt.raids25 = math.max(0, (pAtt.raids25 or 1) - 1)
-                if pAtt.totalScore25 then
-                    local avg25 = pAtt.raids25 > 0 and (pAtt.totalScore25 / (pAtt.raids25 + 1)) or 100
-                    pAtt.totalScore25 = math.max(0, pAtt.totalScore25 - avg25)
-                end
-            end
-        end
-    end
     BRutus.db.raidTracker.sessions[sessionID] = nil
+    -- Rebuild from scratch so attendance stays consistent
+    self:RebuildAttendanceFromSessions()
+
+    -- Broadcast the deletion to all other officer clients
+    self:BroadcastDeleteSession(sessionID)
+end
+
+----------------------------------------------------------------------
+-- Broadcast a session deletion to guild (officers apply it on receive)
+----------------------------------------------------------------------
+function RaidTracker:BroadcastDeleteSession(sessionID)
+    if not BRutus:IsOfficer() then return end
+    if not BRutus.CommSystem then return end
+    if not IsInGuild() then return end
+
+    local LibSerialize = LibStub("LibSerialize")
+    local serialized = LibSerialize:Serialize({ sessionID = sessionID })
+    BRutus.CommSystem:SendMessage(BRutus.CommSystem.MSG_TYPES.RAID_DELETE, serialized)
+end
+
+----------------------------------------------------------------------
+-- Handle an incoming session deletion broadcast from another officer.
+-- Sender is already verified as officer before this is called.
+----------------------------------------------------------------------
+function RaidTracker:HandleDeleteIncoming(data)
+    local LibSerialize = LibStub("LibSerialize")
+    local ok, payload = LibSerialize:Deserialize(data)
+    if not ok or type(payload) ~= "table" then return end
+
+    local sessionID = payload.sessionID
+    if not sessionID then return end
+
+    local raidDB = BRutus.db.raidTracker
+    if not raidDB or not raidDB.sessions then return end
+    if not raidDB.sessions[sessionID] then return end  -- already gone
+
+    raidDB.sessions[sessionID] = nil
+    self:RebuildAttendanceFromSessions()
+
+    -- Refresh UI if the raids panel is open
+    if BRutus.RaidsPanelOpen then
+        BRutus:RefreshRaidsPanel(
+            BRutus.RaidsPanelOpen.sessionContent,
+            BRutus.RaidsPanelOpen.attContent,
+            BRutus.RaidsPanelOpen.statusText
+        )
+    end
 end
 
 function RaidTracker:CountTable(t)
