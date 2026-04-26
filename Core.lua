@@ -167,7 +167,8 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
     elseif event == "PLAYER_LOGIN" then
         BRutus:OnLogin()
     elseif event == "PLAYER_ENTERING_WORLD" then
-        BRutus:OnEnterWorld()
+        local isInitialLogin, isReloadingUi = ...
+        BRutus:OnEnterWorld(isInitialLogin, isReloadingUi)
     elseif event == "GUILD_ROSTER_UPDATE" then
         BRutus:OnGuildRosterUpdate()
     elseif event == "PLAYER_GUILD_UPDATE" then
@@ -341,8 +342,14 @@ function BRutus:InitModules()
     BRutus:HookGuildFrame()
 end
 
-function BRutus:OnEnterWorld()
+function BRutus:OnEnterWorld(isInitialLogin, isReloadingUi)
     if not self.db or not self.guildKey then return end
+
+    -- Only run the full startup sequence on the initial login or UI reload.
+    -- PLAYER_ENTERING_WORLD also fires on every zone/instance transition —
+    -- we don't want to re-collect, re-broadcast, or re-check professions then.
+    if not isInitialLogin and not isReloadingUi then return end
+
     -- Collect own data after a short delay
     C_Timer.After(3, function()
         if BRutus.DataCollector then
