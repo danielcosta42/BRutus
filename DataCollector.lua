@@ -80,10 +80,9 @@ function DataCollector:CollectGear()
     for _, slotInfo in ipairs(BRutus.SlotIDs) do
         local slotId = slotInfo.id
         local itemLink = GetInventoryItemLink("player", slotId)
-        local itemTexture = GetInventoryItemTexture("player", slotId)
 
         if itemLink then
-            local itemName, _, itemQuality, itemLevel, _, _, _, _, _, itemIcon = GetItemInfo(itemLink)
+            local itemName, _, itemQuality, itemLevel, _, _, _, _, _, _ = GetItemInfo(itemLink)
             local itemId = tonumber(itemLink:match("item:(%d+)"))
 
             -- Parse enchant and gems from the item link
@@ -96,9 +95,7 @@ function DataCollector:CollectGear()
                 name = itemName or "",
                 quality = itemQuality or 0,
                 ilvl = itemLevel or 0,
-                icon = itemTexture or itemIcon or "",
                 enchantId = enchantId,
-                enchantName = enchantId and enchantId > 0 and self:GetEnchantName(enchantId) or nil,
                 gems = gems,
             }
         else
@@ -123,12 +120,7 @@ function DataCollector:ParseItemLink(link)
     for i = 3, 5 do
         local gemId = tonumber(parts[i]) or 0
         if gemId > 0 then
-            local gemName, _, _, _, _, _, _, _, _, gemIcon = GetItemInfo(gemId)
-            table.insert(gems, {
-                id = gemId,
-                name = gemName or "",
-                icon = gemIcon or "",
-            })
+            tinsert(gems, { id = gemId })
         end
     end
 
@@ -408,14 +400,12 @@ function DataCollector:GetBroadcastData()
                 name = item.name,
                 quality = item.quality,
                 ilvl = item.ilvl,
-                icon = item.icon,
                 enchantId = item.enchantId,
-                enchantName = item.enchantName,
             }
             if item.gems and #item.gems > 0 then
                 gearEntry.gems = {}
                 for _, gem in ipairs(item.gems) do
-                    table.insert(gearEntry.gems, { id = gem.id, name = gem.name, icon = gem.icon })
+                    tinsert(gearEntry.gems, { id = gem.id })
                 end
             end
             clean.gear[slotId] = gearEntry

@@ -586,7 +586,9 @@ function BRutus.CreateRosterFrame()
     end
 
     function frame:BuildMemberList()
-        local members = {}
+        -- Reuse the existing table to avoid allocating a new one on every refresh.
+        wipe(self.sortedMembers)
+        local members = self.sortedMembers
         local showOffline = BRutus.db.settings.showOffline
         local filter = self.searchFilter and strlower(strtrim(self.searchFilter)) or ""
 
@@ -690,8 +692,6 @@ function BRutus.CreateRosterFrame()
                 return va > vb
             end
         end)
-
-        self.sortedMembers = members
     end
 
     function frame:UpdateSortIndicators()

@@ -8,6 +8,47 @@ local C = BRutus.Colors
 local DETAIL_WIDTH = 420
 local DETAIL_HEIGHT = 620
 
+-- Static stat list — defined once at module level to avoid per-call allocation.
+local STATS_LIST = {
+    { label = "HP",  key = "health",    color = "green" },
+    { label = "MP",  key = "mana",      color = "blue"  },
+    { label = "STR", key = "strength"  },
+    { label = "AGI", key = "agility"   },
+    { label = "STA", key = "stamina"   },
+    { label = "INT", key = "intellect" },
+    { label = "SPI", key = "spirit"    },
+}
+
+----------------------------------------------------------------------
+-- Widget pool for PopulateDetail.
+-- WoW FontStrings and Textures are never garbage-collected once created.
+-- Without pooling, every member view permanently allocates ~200 new
+-- FontStrings and ~25 Textures as children of the scroll child.
+-- The pool caps growth at the high-water mark of the most complex
+-- member ever shown, then reuses those objects for subsequent views.
+----------------------------------------------------------------------
+local function _pFS(parent)
+    local p = parent._p
+    p.fsCur = p.fsCur + 1
+    local fs = p.fs[p.fsCur]
+    if not fs then
+        fs = parent:CreateFontString(nil, "OVERLAY")
+        p.fs[p.fsCur] = fs
+    end
+    return fs
+end
+
+local function _pBG(parent)
+    local p = parent._p
+    p.bgCur = p.bgCur + 1
+    local tx = p.bg[p.bgCur]
+    if not tx then
+        tx = parent:CreateTexture(nil, "BACKGROUND")
+        p.bg[p.bgCur] = tx
+    end
+    return tx
+end
+
 ----------------------------------------------------------------------
 -- Create an invisible tooltip hover zone over a region
 -- anchor: FontString or Frame to overlay
@@ -167,12 +208,26 @@ end
 -- Populate detail with member data
 ----------------------------------------------------------------------
 function PopulateDetail(frame, data)
-    -- Clear previous content
     local child = frame.content
+    -- Initialise or reset the FontString/Texture pool. Pooled objects are
+    -- hidden and their cursors reset so the current populate reuses them
+    -- in order rather than accumulating fresh C-level objects each call.
+    if not child._p then
+        child._p = { fs = {}, bg = {}, fsCur = 0, bgCur = 0 }
+    end
+    local p = child._p
+    for _, fs in ipairs(p.fs) do
+        fs:Hide(); fs:ClearAllPoints(); fs:SetText(""); fs:SetWidth(0); fs:SetWordWrap(false)
+    end
+    for _, tx in ipairs(p.bg) do tx:Hide(); tx:ClearAllPoints() end
+    p.fsCur, p.bgCur = 0, 0
+    -- Hide non-pooled child frames (Buttons, EditBoxes, plain Frames created
+    -- by interactive sections such as alt-links and trial notes).
     local children = { child:GetChildren() }
     for _, c in ipairs(children) do c:Hide() end
-    local regions = { child:GetRegions() }
-    for _, r in ipairs(regions) do r:Hide() end
+
+    -- Reset scroll position so switching members always starts at the top.
+    child:GetParent():SetVerticalScroll(0)
 
     -- Class icon
     local classCoords = CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[data.class]
@@ -240,10 +295,24 @@ function PopulateDetail(frame, data)
                 { r = cr*0.40, g = cg*0.40, b = cb*0.40 },
             }
 
+            local BAR_W = contentWidth - 20
             local xPos = 0
+            local nonZero = 0
+            for _, pts in ipairs(spec.points) do if pts > 0 then nonZero = nonZero + 1 end end
+
+            local drawn = 0
             for i, pts in ipairs(spec.points) do
                 if pts > 0 then
-                    local segW = math.floor(((pts / total) * (contentWidth - 20)) + 0.5)
+                    drawn = drawn + 1
+                    -- Last drawn segment gets the remainder to absorb rounding drift.
+                    local segW
+                    if drawn == nonZero then
+                        segW = BAR_W - xPos
+                    else
+                        segW = math.floor((pts / total) * BAR_W + 0.5)
+                    end
+
+                    -- Segment fill
                     local seg = barFrame:CreateTexture(nil, "OVERLAY")
                     seg:SetTexture("Interface\\Buttons\\WHITE8x8")
                     seg:SetPoint("TOPLEFT", xPos, 0)
@@ -252,12 +321,33 @@ function PopulateDetail(frame, data)
                     seg:SetVertexColor(tc.r, tc.g, tc.b, 0.85)
                     seg:Show()
 
+                    -- Label clipped to segment width; text adapts to available space
                     local segLabel = barFrame:CreateFontString(nil, "OVERLAY")
                     segLabel:SetFont("Fonts\\FRIZQT__.TTF", 9, "OUTLINE")
-                    segLabel:SetPoint("CENTER", seg, "CENTER", 0, 0)
-                    segLabel:SetText(pts .. "  " .. (spec.names[i] or ""))
-                    segLabel:SetTextColor(1, 1, 1)
+                    segLabel:SetPoint("TOPLEFT", xPos + 4, -1)
+                    segLabel:SetSize(segW - 8, 18)
+                    segLabel:SetJustifyH("CENTER")
+                    segLabel:SetJustifyV("MIDDLE")
+                    segLabel:SetWordWrap(false)
+                    segLabel:SetTextColor(1, 1, 1, 0.95)
+                    if segW >= 55 then
+                        segLabel:SetText(pts .. "  " .. (spec.names[i] or ""))
+                    elseif segW >= 22 then
+                        segLabel:SetText(tostring(pts))
+                    else
+                        segLabel:SetText("")
+                    end
                     segLabel:Show()
+
+                    -- 1-px divider before each segment except the first
+                    if xPos > 0 then
+                        local div = barFrame:CreateTexture(nil, "OVERLAY")
+                        div:SetTexture("Interface\\Buttons\\WHITE8x8")
+                        div:SetPoint("TOPLEFT", xPos, 0)
+                        div:SetSize(1, 18)
+                        div:SetVertexColor(0, 0, 0, 0.7)
+                        div:Show()
+                    end
 
                     xPos = xPos + segW
                 end
@@ -266,7 +356,7 @@ function PopulateDetail(frame, data)
         end
 
         -- Text label: e.g.  "41 / 5 / 15  (Protection)"
-        local specText = child:CreateFontString(nil, "OVERLAY")
+        local specText = _pFS(child)
         specText:SetFont("Fonts\\FRIZQT__.TTF", 13, "OUTLINE")
         specText:SetPoint("TOPLEFT", 10, yOff)
         specText:SetTextColor(cr, cg, cb)
@@ -284,7 +374,7 @@ function PopulateDetail(frame, data)
             else
                 ageStr = math.floor(age / 86400) .. "d ago"
             end
-            local scanText = child:CreateFontString(nil, "OVERLAY")
+            local scanText = _pFS(child)
             scanText:SetFont("Fonts\\FRIZQT__.TTF", 9, "OUTLINE")
             scanText:SetPoint("TOPLEFT", 10, yOff)
             scanText:SetTextColor(C.silver.r, C.silver.g, C.silver.b, 0.6)
@@ -293,7 +383,7 @@ function PopulateDetail(frame, data)
             yOff = yOff - 18
         end
     else
-        local noSpec = child:CreateFontString(nil, "OVERLAY")
+        local noSpec = _pFS(child)
         noSpec:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
         noSpec:SetPoint("TOPLEFT", 15, yOff)
         noSpec:SetTextColor(C.silver.r, C.silver.g, C.silver.b, 0.5)
@@ -316,34 +406,24 @@ function PopulateDetail(frame, data)
         statsGrid:SetSize(contentWidth - 20, 40)
         statsGrid:Show()
 
-        local statsList = {
-            { label = "HP",  value = data.stats.health or 0, color = C.green },
-            { label = "MP",  value = data.stats.mana or 0,   color = C.blue },
-            { label = "STR", value = data.stats.strength or 0 },
-            { label = "AGI", value = data.stats.agility or 0 },
-            { label = "STA", value = data.stats.stamina or 0 },
-            { label = "INT", value = data.stats.intellect or 0 },
-            { label = "SPI", value = data.stats.spirit or 0 },
-        }
-
         local colWidth = (contentWidth - 20) / 4
-        for i, stat in ipairs(statsList) do
+        for i, stat in ipairs(STATS_LIST) do
             local col = ((i - 1) % 4)
             local row = math.floor((i - 1) / 4)
+            local sc = stat.color and C[stat.color] or C.white
 
-            local label = child:CreateFontString(nil, "OVERLAY")
+            local label = _pFS(child)
             label:SetFont("Fonts\\FRIZQT__.TTF", 9, "OUTLINE")
             label:SetPoint("TOPLEFT", statsGrid, "TOPLEFT", col * colWidth, -(row * 20))
             label:SetTextColor(C.silver.r, C.silver.g, C.silver.b, 0.7)
             label:SetText(stat.label)
             label:Show()
 
-            local value = child:CreateFontString(nil, "OVERLAY")
+            local value = _pFS(child)
             value:SetFont("Fonts\\FRIZQT__.TTF", 11, "OUTLINE")
             value:SetPoint("LEFT", label, "RIGHT", 4, 0)
-            local sc = stat.color or C.white
             value:SetTextColor(sc.r, sc.g, sc.b)
-            value:SetText(tostring(stat.value))
+            value:SetText(tostring(data.stats[stat.key] or 0))
             value:Show()
         end
 
@@ -362,7 +442,7 @@ function PopulateDetail(frame, data)
             yOff = CreateGearRow(child, slotInfo.id, item, yOff, contentWidth)
         end
     else
-        local noData = child:CreateFontString(nil, "OVERLAY")
+        local noData = _pFS(child)
         noData:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
         noData:SetPoint("TOPLEFT", 15, yOff)
         noData:SetTextColor(C.silver.r, C.silver.g, C.silver.b, 0.5)
@@ -383,7 +463,7 @@ function PopulateDetail(frame, data)
             yOff = CreateProfessionRow(child, prof, yOff, contentWidth)
         end
     else
-        local noData = child:CreateFontString(nil, "OVERLAY")
+        local noData = _pFS(child)
         noData:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
         noData:SetPoint("TOPLEFT", 15, yOff)
         noData:SetTextColor(C.silver.r, C.silver.g, C.silver.b, 0.5)
@@ -411,7 +491,7 @@ function PopulateDetail(frame, data)
             yOff = CreateAttunementRow(child, att, yOff, contentWidth)
         end
     else
-        local noData = child:CreateFontString(nil, "OVERLAY")
+        local noData = _pFS(child)
         noData:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
         noData:SetPoint("TOPLEFT", 15, yOff)
         noData:SetTextColor(C.silver.r, C.silver.g, C.silver.b, 0.5)
@@ -439,7 +519,7 @@ function PopulateDetail(frame, data)
             end
             local localName = BRutus.Wishlist and BRutus.Wishlist:GetItemName(item.itemId) or ("Item #" .. (item.itemId or "?"))
             local osStr = item.isOffspec and " |cffAAAAAA(OS)|r" or ""
-            local itemStr = child:CreateFontString(nil, "OVERLAY")
+            local itemStr = _pFS(child)
             itemStr:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
             itemStr:SetPoint("TOPLEFT", 20, yOff)
             itemStr:SetWidth(contentWidth - 30)
@@ -470,7 +550,7 @@ function PopulateDetail(frame, data)
         yOff = CreateSectionHeader(child, attStr, yOff, contentWidth)
 
         if att.lastRaid > 0 then
-            local lastStr = child:CreateFontString(nil, "OVERLAY")
+            local lastStr = _pFS(child)
             lastStr:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
             lastStr:SetPoint("TOPLEFT", 15, yOff - 5)
             lastStr:SetTextColor(C.silver.r, C.silver.g, C.silver.b)
@@ -493,7 +573,7 @@ function PopulateDetail(frame, data)
         local recentLoot = BRutus.LootTracker:GetPlayerLoot(playerKey, 5)
         for _, entry in ipairs(recentLoot) do
             local qColor = BRutus.QualityColors[entry.quality] or BRutus.QualityColors[1]
-            local itemStr = child:CreateFontString(nil, "OVERLAY")
+            local itemStr = _pFS(child)
             itemStr:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
             itemStr:SetPoint("TOPLEFT", 15, yOff - 5)
             itemStr:SetWidth(contentWidth - 30)
@@ -533,7 +613,7 @@ function PopulateDetail(frame, data)
             if daysRem then trialStr = trialStr .. "  (" .. daysRem .. " days left)" end
             yOff = CreateSectionHeader(child, trialStr, yOff, contentWidth)
 
-            local infoStr = child:CreateFontString(nil, "OVERLAY")
+            local infoStr = _pFS(child)
             infoStr:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
             infoStr:SetPoint("TOPLEFT", 15, yOff - 5)
             infoStr:SetTextColor(C.silver.r, C.silver.g, C.silver.b)
@@ -548,7 +628,7 @@ function PopulateDetail(frame, data)
                 local ilvlColor = progress.ilvlDelta > 0 and C.green or (progress.ilvlDelta < 0 and C.red or C.silver)
                 local ilvlSign = progress.ilvlDelta > 0 and "+" or ""
                 local ilvlStr = format("iLvl: %d >> %d  (%s%d)", progress.startIlvl, progress.currentIlvl, ilvlSign, progress.ilvlDelta)
-                local ilvlText = child:CreateFontString(nil, "OVERLAY")
+                local ilvlText = _pFS(child)
                 ilvlText:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
                 ilvlText:SetPoint("TOPLEFT", 15, yOff - 3)
                 ilvlText:SetTextColor(ilvlColor.r, ilvlColor.g, ilvlColor.b)
@@ -558,7 +638,7 @@ function PopulateDetail(frame, data)
                 -- Attunement progress
                 local attColor = progress.attDelta > 0 and C.green or C.silver
                 local attStr = format("Attunements: %d/%d >> %d/%d  (+%d)", progress.startAttDone, progress.attTotal, progress.currentAttDone, progress.attTotal, progress.attDelta)
-                local attText = child:CreateFontString(nil, "OVERLAY")
+                local attText = _pFS(child)
                 attText:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
                 attText:SetPoint("TOPLEFT", contentWidth / 2, yOff - 3)
                 attText:SetTextColor(attColor.r, attColor.g, attColor.b)
@@ -569,7 +649,7 @@ function PopulateDetail(frame, data)
 
             -- Trial notes (all of them, not just 3)
             if trial.notes and #trial.notes > 0 then
-                local notesLabel = child:CreateFontString(nil, "OVERLAY")
+                local notesLabel = _pFS(child)
                 notesLabel:SetFont("Fonts\\FRIZQT__.TTF", 9, "OUTLINE")
                 notesLabel:SetPoint("TOPLEFT", 15, yOff - 6)
                 notesLabel:SetTextColor(C.gold.r, C.gold.g, C.gold.b)
@@ -578,7 +658,7 @@ function PopulateDetail(frame, data)
                 yOff = yOff - 18
 
                 for _, note in ipairs(trial.notes) do
-                    local noteFS = child:CreateFontString(nil, "OVERLAY")
+                    local noteFS = _pFS(child)
                     noteFS:SetFont("Fonts\\FRIZQT__.TTF", 9, "")
                     noteFS:SetPoint("TOPLEFT", 20, yOff - 2)
                     noteFS:SetWidth(contentWidth - 40)
@@ -657,7 +737,7 @@ function PopulateDetail(frame, data)
             for k, v in pairs(tags) do
                 table.insert(tagParts, k .. ": " .. tostring(v))
             end
-            local tagStr = child:CreateFontString(nil, "OVERLAY")
+            local tagStr = _pFS(child)
             tagStr:SetFont("Fonts\\FRIZQT__.TTF", 9, "OUTLINE")
             tagStr:SetPoint("TOPLEFT", 15, yOff - 5)
             tagStr:SetTextColor(C.accent.r, C.accent.g, C.accent.b)
@@ -669,7 +749,7 @@ function PopulateDetail(frame, data)
         -- Show last 3 notes
         for i = 1, math.min(3, #notes) do
             local note = notes[i]
-            local noteStr = child:CreateFontString(nil, "OVERLAY")
+            local noteStr = _pFS(child)
             noteStr:SetFont("Fonts\\FRIZQT__.TTF", 9, "")
             noteStr:SetPoint("TOPLEFT", 15, yOff - 3)
             noteStr:SetWidth(contentWidth - 30)
@@ -696,7 +776,7 @@ function PopulateDetail(frame, data)
         yOff = CreateSectionHeader(child, "PERSONAGENS VINCULADOS" .. hdrSuffix, yOff, contentWidth)
         yOff = yOff - 5
 
-        local noteLabel = child:CreateFontString(nil, "OVERLAY")
+        local noteLabel = _pFS(child)
         noteLabel:SetFont("Fonts\\FRIZQT__.TTF", 9, "")
         noteLabel:SetPoint("TOPLEFT", 12, yOff)
         noteLabel:SetWidth(contentWidth - 20)
@@ -710,7 +790,7 @@ function PopulateDetail(frame, data)
             if lk ~= playerKey then
                 local lkName = lk:match("^([^-]+)") or lk
                 local lkIsMain = (altLinks[lk] == nil)
-                local lkLabel = child:CreateFontString(nil, "OVERLAY")
+                local lkLabel = _pFS(child)
                 lkLabel:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
                 lkLabel:SetPoint("TOPLEFT", 12, yOff)
                 lkLabel:SetTextColor(C.gold.r, C.gold.g, C.gold.b)
@@ -779,29 +859,31 @@ function PopulateDetail(frame, data)
         yOff = yOff - 34
     end
 
-    -- Update scroll child height
+    -- Update scroll child height and refresh the scroll range so the
+    -- scrollbar clamps correctly when content is shorter than the frame.
     child:SetHeight(math.abs(yOff) + 20)
+    child:GetParent():UpdateScrollChildRect()
 end
 
 ----------------------------------------------------------------------
 -- Create a section header
 ----------------------------------------------------------------------
 function CreateSectionHeader(parent, text, yOff, width)
-    local bg = parent:CreateTexture(nil, "BACKGROUND")
+    local bg = _pBG(parent)
     bg:SetTexture("Interface\\Buttons\\WHITE8x8")
     bg:SetPoint("TOPLEFT", 0, yOff)
     bg:SetSize(width, 22)
     bg:SetVertexColor(C.headerBg.r, C.headerBg.g, C.headerBg.b, 0.6)
     bg:Show()
 
-    local label = parent:CreateFontString(nil, "OVERLAY")
+    local label = _pFS(parent)
     label:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
     label:SetPoint("LEFT", bg, "LEFT", 10, 0)
     label:SetTextColor(C.gold.r, C.gold.g, C.gold.b, 0.9)
     label:SetText(text)
     label:Show()
 
-    local line = parent:CreateTexture(nil, "ARTWORK")
+    local line = _pBG(parent)
     line:SetTexture("Interface\\Buttons\\WHITE8x8")
     line:SetPoint("TOPLEFT", 0, yOff - 22)
     line:SetSize(width, 1)
@@ -828,7 +910,7 @@ function CreateGearRow(parent, slotId, item, yOff, width)
     local hasExtra = false
 
     -- Slot label
-    local slotLabel = parent:CreateFontString(nil, "OVERLAY")
+    local slotLabel = _pFS(parent)
     slotLabel:SetFont("Fonts\\FRIZQT__.TTF", 9, "")
     slotLabel:SetPoint("TOPLEFT", 10, yOff - 4)
     slotLabel:SetWidth(65)
@@ -838,18 +920,14 @@ function CreateGearRow(parent, slotId, item, yOff, width)
     slotLabel:Show()
 
     if item and item.name and item.name ~= "" then
-        -- Resolve localized item name from ID when available
-        local displayName = item.name
-        if item.id then
-            local localName = GetItemInfo(item.id)
-            if localName and localName ~= "" then
-                displayName = localName
-            end
-        end
+        -- Resolve localized item name and icon from client cache
+        local localName, _, _, _, _, _, _, _, _, itemIcon = GetItemInfo(item.id or 0)
+        local displayName = (localName and localName ~= "") and localName or item.name
+        local icon = (itemIcon and itemIcon ~= "") and itemIcon or ""
 
         -- Item icon
-        if item.icon and item.icon ~= "" then
-            local iconFrame = UI:CreateIcon(parent, 18, item.icon)
+        if icon ~= "" then
+            local iconFrame = UI:CreateIcon(parent, 18, icon)
             iconFrame:SetPoint("TOPLEFT", 80, yOff - 1)
             iconFrame:Show()
             UI:SetIconQuality(iconFrame, item.quality)
@@ -857,7 +935,7 @@ function CreateGearRow(parent, slotId, item, yOff, width)
 
         -- Item name (colored by quality)
         local qColor = BRutus.QualityColors[item.quality] or BRutus.QualityColors[1]
-        local nameText = parent:CreateFontString(nil, "OVERLAY")
+        local nameText = _pFS(parent)
         nameText:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
         nameText:SetPoint("TOPLEFT", 106, yOff - 5)
         nameText:SetJustifyH("LEFT")
@@ -873,8 +951,9 @@ function CreateGearRow(parent, slotId, item, yOff, width)
         local gemAnchor = nameText
         if item.gems and #item.gems > 0 then
             for _, gem in ipairs(item.gems) do
-                if gem.icon and gem.icon ~= "" then
-                    local gemFrame = UI:CreateIcon(parent, 12, gem.icon)
+                local _, _, _, _, _, _, _, _, _, gemIcon = GetItemInfo(gem.id or 0)
+                if gemIcon and gemIcon ~= "" then
+                    local gemFrame = UI:CreateIcon(parent, 12, gemIcon)
                     gemFrame:SetPoint("LEFT", gemAnchor, "RIGHT", 4, 0)
                     gemFrame:Show()
                     gemAnchor = gemFrame
@@ -896,24 +975,26 @@ function CreateGearRow(parent, slotId, item, yOff, width)
         end
 
         -- Item level
-        local ilvlText = parent:CreateFontString(nil, "OVERLAY")
+        local ilvlText = _pFS(parent)
         ilvlText:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
         ilvlText:SetPoint("TOPRIGHT", -10, yOff - 5)
         ilvlText:SetText(BRutus:FormatItemLevel(item.ilvl))
         ilvlText:Show()
 
-        -- Enchant line — sub-row below item name
+        -- Enchant line — resolve name from DataCollector cache, same as local player
         local enchantY = yOff - ROW_H
-        if item.enchantName then
-            local enchText = parent:CreateFontString(nil, "OVERLAY")
+        local enchantName = item.enchantId and item.enchantId > 0
+            and BRutus.DataCollector and BRutus.DataCollector:GetEnchantName(item.enchantId)
+        if enchantName then
+            local enchText = _pFS(parent)
             enchText:SetFont("Fonts\\FRIZQT__.TTF", 9, "")
             enchText:SetPoint("TOPLEFT", 106, enchantY)
             enchText:SetTextColor(0.0, 0.8, 0.0)
-            enchText:SetText(item.enchantName)
+            enchText:SetText(enchantName)
             enchText:Show()
             hasExtra = true
         elseif item.enchantId and item.enchantId > 0 then
-            local enchText = parent:CreateFontString(nil, "OVERLAY")
+            local enchText = _pFS(parent)
             enchText:SetFont("Fonts\\FRIZQT__.TTF", 9, "")
             enchText:SetPoint("TOPLEFT", 106, enchantY)
             enchText:SetTextColor(0.0, 0.8, 0.0)
@@ -921,7 +1002,7 @@ function CreateGearRow(parent, slotId, item, yOff, width)
             enchText:Show()
             hasExtra = true
         elseif ENCHANT_WARNING_SLOTS[slotId] then
-            local warnText = parent:CreateFontString(nil, "OVERLAY")
+            local warnText = _pFS(parent)
             warnText:SetFont("Fonts\\FRIZQT__.TTF", 9, "")
             warnText:SetPoint("TOPLEFT", 106, enchantY)
             warnText:SetTextColor(C.red.r, C.red.g, C.red.b, 0.7)
@@ -931,7 +1012,7 @@ function CreateGearRow(parent, slotId, item, yOff, width)
         end
     else
         -- Empty slot
-        local emptyText = parent:CreateFontString(nil, "OVERLAY")
+        local emptyText = _pFS(parent)
         emptyText:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
         emptyText:SetPoint("TOPLEFT", 82, yOff - 5)
         emptyText:SetTextColor(0.3, 0.3, 0.3)
@@ -942,7 +1023,7 @@ function CreateGearRow(parent, slotId, item, yOff, width)
     local totalH = ROW_H + (hasExtra and subRowH or 0)
 
     -- Separator
-    local sep = parent:CreateTexture(nil, "ARTWORK")
+    local sep = _pBG(parent)
     sep:SetTexture("Interface\\Buttons\\WHITE8x8")
     sep:SetPoint("TOPLEFT", 10, yOff - totalH)
     sep:SetSize(width - 20, 1)
@@ -960,7 +1041,7 @@ function CreateProfessionRow(parent, prof, yOff, width)
 
     -- Profession name
     local nameColor = prof.isPrimary and C.gold or C.silver
-    local nameText = parent:CreateFontString(nil, "OVERLAY")
+    local nameText = _pFS(parent)
     nameText:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
     nameText:SetPoint("TOPLEFT", 15, yOff - 3)
     nameText:SetTextColor(nameColor.r, nameColor.g, nameColor.b)
@@ -968,7 +1049,7 @@ function CreateProfessionRow(parent, prof, yOff, width)
     nameText:Show()
 
     -- Skill level text
-    local skillText = parent:CreateFontString(nil, "OVERLAY")
+    local skillText = _pFS(parent)
     skillText:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
     skillText:SetPoint("TOPRIGHT", -10, yOff - 4)
     skillText:SetTextColor(C.white.r, C.white.g, C.white.b)
@@ -991,7 +1072,7 @@ function CreateAttunementRow(parent, att, yOff, width)
     local ROW_H = 34
 
     -- Background with subtle color coding
-    local rowBg = parent:CreateTexture(nil, "BACKGROUND")
+    local rowBg = _pBG(parent)
     rowBg:SetTexture("Interface\\Buttons\\WHITE8x8")
     rowBg:SetPoint("TOPLEFT", 5, yOff)
     rowBg:SetSize(width - 10, ROW_H - 2)
@@ -1003,7 +1084,7 @@ function CreateAttunementRow(parent, att, yOff, width)
     rowBg:Show()
 
     -- Tier badge
-    local tierBadge = parent:CreateFontString(nil, "OVERLAY")
+    local tierBadge = _pFS(parent)
     tierBadge:SetFont("Fonts\\FRIZQT__.TTF", 8, "OUTLINE")
     tierBadge:SetPoint("TOPLEFT", 10, yOff - 4)
     tierBadge:SetTextColor(C.accentDim.r, C.accentDim.g, C.accentDim.b)
@@ -1011,13 +1092,13 @@ function CreateAttunementRow(parent, att, yOff, width)
     tierBadge:Show()
 
     -- Raid name
-    local nameText = parent:CreateFontString(nil, "OVERLAY")
+    local nameText = _pFS(parent)
     nameText:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
     nameText:SetPoint("LEFT", tierBadge, "RIGHT", 5, 0)
     nameText:Show()
 
     -- Status
-    local statusText = parent:CreateFontString(nil, "OVERLAY")
+    local statusText = _pFS(parent)
     statusText:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
     statusText:SetPoint("TOPRIGHT", -10, yOff - 4)
     statusText:Show()
