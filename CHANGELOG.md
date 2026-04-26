@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.23.0] - 2026-04-26
+
+### Added
+- Implement Wishlist System for per-character item tracking and guild-wide synchronization
+
+### Fixed
+- streamline attendance migration check for old format
+
+
 ## [1.22.0] - 2026-04-26
 
 ### Added
