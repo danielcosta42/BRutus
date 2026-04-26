@@ -737,8 +737,8 @@ function LootMaster:OnAddonMessage(prefix, msg, channel, sender)
         -- ML awarded item.
         -- Extended format: playerName|itemId|quality|raidName|itemLink
         -- (raidName has no pipes; itemLink is the remainder so it can contain pipes)
-        local awardedTo, _awardItemId, awardQuality, awardRaid, link =
-            rest:match("^([^|]+)|(%d+)|(%d+)|([^|]*)|(.+)$")
+        local awardedTo, awardQuality, awardRaid, link =
+            rest:match("^([^|]+)|%d+|(%d+)|([^|]*)|(.+)$")
         if not awardedTo then
             -- Backward compat: old format playerName|itemLink
             awardedTo, link = rest:match("^([^|]+)|(.+)$")

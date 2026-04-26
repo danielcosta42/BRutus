@@ -487,9 +487,8 @@ function RaidTracker:GetRecentSessions(limit, only25, guildOnly)
     for id, session in pairs(BRutus.db.raidTracker.sessions) do
         -- guildOnly: exclude sessions explicitly marked as non-guild raids.
         -- Sessions without the flag (legacy data) are treated as guild raids.
-        if guildOnly and session.isGuildRaid == false then
-            -- skip
-        elseif not only25 or self:Is25Man(session.instanceID) then
+        local skipNonGuild = guildOnly and session.isGuildRaid == false
+        if not skipNonGuild and (not only25 or self:Is25Man(session.instanceID)) then
             table.insert(sessions, { id = id, data = session })
         end
     end
@@ -576,8 +575,8 @@ function RaidTracker:MergeDuplicateSessions()
                         -- Dedup key: same encounterID + same outcome (success/wipe/nil)
                         -- within a 5-minute proximity window.
                         local ENC_PROX = 300  -- seconds
-                        local function encMatchesExisting(enc, list)
-                            for _, e in ipairs(list) do
+                        local function encMatchesExisting(enc, encList)
+                            for _, e in ipairs(encList) do
                                 if e.id == enc.id
                                     and e.success == enc.success
                                     and math.abs((e.startTime or 0) - (enc.startTime or 0)) <= ENC_PROX
