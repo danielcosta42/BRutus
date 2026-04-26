@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.25.1] - 2026-04-26
+
+### Fixed
+- update isGuildRaid checks to include legacy session data
+
+
 ## [1.25.0] - 2026-04-26
 
 ### Added
