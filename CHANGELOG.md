@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.24.1] - 2026-04-26
+
+### Changed
+- update attendance merging logic to support new nested format
+
+
 ## [1.24.0] - 2026-04-26
 
 ### Added
