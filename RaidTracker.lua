@@ -793,28 +793,42 @@ function RaidTracker:HandleIncoming(data)
     if not raidDB.attendance then raidDB.attendance = {} end
     if not raidDB.sessions   then raidDB.sessions   = {} end
 
-    -- Merge attendance: nested by groupTag → playerKey
-    -- Keep higher raid count; on tie prefer most recent lastRaid
-    for groupTag, incomingGroup in pairs(payload.attendance or {}) do
-        if type(incomingGroup) == "table" then
-            if not raidDB.attendance[groupTag] then
-                raidDB.attendance[groupTag] = {}
-            end
-            local localGroup = raidDB.attendance[groupTag]
-            for playerKey, incoming in pairs(incomingGroup) do
-                local existing = localGroup[playerKey]
-                if not existing then
+    -- Merge attendance.
+    -- New format: attendance[groupTag][playerKey] = { raids, ... }
+    -- Old format (peers not yet updated): attendance[playerKey] = { raids, ... }
+    -- Detect by checking whether the first value is a player record (has .raids/.lastRaid).
+    local function mergePlayerRecord(localGroup, playerKey, incoming)
+        if type(incoming) ~= "table" then return end
+        local existing = localGroup[playerKey]
+        if not existing then
+            localGroup[playerKey] = incoming
+        else
+            local inRaids = incoming.raids or 0
+            local exRaids = existing.raids or 0
+            if inRaids > exRaids then
+                localGroup[playerKey] = incoming
+            elseif inRaids == exRaids then
+                if (incoming.lastRaid or 0) > (existing.lastRaid or 0) then
                     localGroup[playerKey] = incoming
-                else
-                    local inRaids = incoming.raids or 0
-                    local exRaids = existing.raids or 0
-                    if inRaids > exRaids then
-                        localGroup[playerKey] = incoming
-                    elseif inRaids == exRaids then
-                        if (incoming.lastRaid or 0) > (existing.lastRaid or 0) then
-                            localGroup[playerKey] = incoming
-                        end
-                    end
+                end
+            end
+        end
+    end
+
+    for outerKey, outerVal in pairs(payload.attendance or {}) do
+        if type(outerVal) == "table" then
+            if outerVal.raids ~= nil or outerVal.lastRaid ~= nil then
+                -- Old flat format: outerKey is playerKey, outerVal is attendance data
+                if not raidDB.attendance[""] then raidDB.attendance[""] = {} end
+                mergePlayerRecord(raidDB.attendance[""], outerKey, outerVal)
+            else
+                -- New nested format: outerKey is groupTag, outerVal is { playerKey → data }
+                if not raidDB.attendance[outerKey] then
+                    raidDB.attendance[outerKey] = {}
+                end
+                local localGroup = raidDB.attendance[outerKey]
+                for playerKey, incoming in pairs(outerVal) do
+                    mergePlayerRecord(localGroup, playerKey, incoming)
                 end
             end
         end
