@@ -16,13 +16,14 @@ local COLUMNS = {
     { key = "professions", label = "PROFESSIONS", width = 160, align = "LEFT" },
     { key = "attunements", label = "ATTUNEMENTS",  width = 140, align = "LEFT" },
     { key = "attendance", label = "ATT%",         width = 50,  align = "CENTER" },
+    { key = "zone",        label = "ZONE",         width = 120, align = "LEFT" },
     { key = "lastSeen",    label = "LAST SEEN",   width = 80,  align = "RIGHT" },
 }
 
 local ROW_HEIGHT = 32
 local HEADER_HEIGHT = 36
 local VISIBLE_ROWS = 18
-local FRAME_WIDTH = 960
+local FRAME_WIDTH = 1080
 local FRAME_HEIGHT = HEADER_HEIGHT + (ROW_HEIGHT * VISIBLE_ROWS) + 150  -- extra space for tab bar
 
 local TAB_HEIGHT = 28
@@ -877,11 +878,21 @@ function CreateRosterRow(parent, rowIndex)
     row.attPctText = attPctText
     xOff = xOff + COLUMNS[9].width
 
+    -- Zone
+    local zoneText = row:CreateFontString(nil, "OVERLAY")
+    zoneText:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
+    zoneText:SetPoint("LEFT", xOff, 0)
+    zoneText:SetWidth(COLUMNS[10].width)
+    zoneText:SetJustifyH("LEFT")
+    zoneText:SetWordWrap(false)
+    row.zoneText = zoneText
+    xOff = xOff + COLUMNS[10].width
+
     -- Last Seen
     local lastSeenText = row:CreateFontString(nil, "OVERLAY")
     lastSeenText:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
     lastSeenText:SetPoint("LEFT", xOff, 0)
-    lastSeenText:SetWidth(COLUMNS[10].width)
+    lastSeenText:SetWidth(COLUMNS[11].width)
     lastSeenText:SetJustifyH("RIGHT")
     lastSeenText:SetTextColor(C.silver.r, C.silver.g, C.silver.b)
     row.lastSeenText = lastSeenText
@@ -1033,6 +1044,14 @@ function UpdateRosterRow(row, data, rowIndex)
         end
     else
         row.attPctText:SetText("")
+    end
+
+    -- Zone (only shown for online members)
+    if data.isOnline and data.zone and data.zone ~= "" then
+        row.zoneText:SetTextColor(textColor(C.silver.r, C.silver.g, C.silver.b))
+        row.zoneText:SetText(data.zone)
+    else
+        row.zoneText:SetText("|cff666666-|r")
     end
 
     -- Last seen

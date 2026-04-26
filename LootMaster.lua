@@ -468,7 +468,7 @@ end
 -- Restricted roll: only the tied top-priority players may roll.
 -- Rolls from anyone else are silently ignored by ProcessSystemRoll.
 ----------------------------------------------------------------------
-function LootMaster:StartRestrictedRoll(tied, allCandidates, itemLink, _lootSlot, itemId)
+function LootMaster:StartRestrictedRoll(tied, _allCandidates, itemLink, _lootSlot, itemId)
     -- Build restricted set (lowercase names for fast lookup)
     self.restrictedRollers = {}
     local names = {}
@@ -632,7 +632,7 @@ end
 ----------------------------------------------------------------------
 -- Handle incoming addon messages
 ----------------------------------------------------------------------
-function LootMaster:OnAddonMessage(prefix, msg, channel, sender)
+function LootMaster:OnAddonMessage(prefix, msg, channel, _sender)
     if prefix ~= "BRutusLM" then return end
     if channel ~= "RAID" and channel ~= "RAID_LEADER" then return end
 
