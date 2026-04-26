@@ -12,8 +12,16 @@ Wishlist.TypeColors = {
 }
 
 function Wishlist:Initialize()
-    if not BRutus.db.myWishlist then
-        BRutus.db.myWishlist = {}
+    if not BRutus.db.wishlists then
+        BRutus.db.wishlists = {}
+    end
+    -- One-time migration: move flat myWishlist to per-char slot
+    if BRutus.db.myWishlist and #BRutus.db.myWishlist > 0 then
+        local charKey = (UnitName("player") or "Unknown") .. "-" .. (GetRealmName() or "Unknown")
+        if not BRutus.db.wishlists[charKey] or #BRutus.db.wishlists[charKey] == 0 then
+            BRutus.db.wishlists[charKey] = BRutus.db.myWishlist
+        end
+        BRutus.db.myWishlist = nil
     end
     if not BRutus.db.guildWishlists then
         BRutus.db.guildWishlists = {}
@@ -144,15 +152,25 @@ function Wishlist:GetItemQuality(itemId)
 end
 
 ----------------------------------------------------------------------
--- Native Wishlist CRUD — operates on BRutus.db.myWishlist
+-- Native Wishlist CRUD — operates on per-character wishlists[charKey]
 ----------------------------------------------------------------------
 local WISHLIST_MAX = 50
+
+-- Returns (and lazily creates) the wishlist table for the current character.
+function Wishlist:GetMyList()
+    if not BRutus.db then return {} end
+    if not BRutus.db.wishlists then BRutus.db.wishlists = {} end
+    local charKey = (UnitName("player") or "Unknown") .. "-" .. (GetRealmName() or "Unknown")
+    if not BRutus.db.wishlists[charKey] then
+        BRutus.db.wishlists[charKey] = {}
+    end
+    return BRutus.db.wishlists[charKey]
+end
 
 -- Add or update an item in the player's own wishlist.
 function Wishlist:AddToWishlist(itemId, itemLink, isOffspec)
     if not BRutus.db then return end
-    if not BRutus.db.myWishlist then BRutus.db.myWishlist = {} end
-    local list = BRutus.db.myWishlist
+    local list = self:GetMyList()
 
     -- If already present, update in place
     for _, entry in ipairs(list) do
@@ -211,12 +229,12 @@ function Wishlist:IsItemDelivered(itemId)
 end
 
 function Wishlist:RemoveFromWishlist(itemId)
-    if not BRutus.db or not BRutus.db.myWishlist then return end
+    if not BRutus.db then return end
     if self:IsItemDelivered(itemId) then
         BRutus:Print("|cffFF4444[Wishlist]|r Este item já foi entregue e não pode ser removido.")
         return
     end
-    local list = BRutus.db.myWishlist
+    local list = self:GetMyList()
     for i = #list, 1, -1 do
         if list[i].itemId == itemId then
             local link = list[i].itemLink
@@ -235,9 +253,9 @@ end
 
 -- Move an item up (-1) or down (+1) in the wishlist order.
 function Wishlist:ReorderWishlist(itemId, direction)
-    if not BRutus.db or not BRutus.db.myWishlist then return end
+    if not BRutus.db then return end
     if self:IsItemDelivered(itemId) then return end
-    local list = BRutus.db.myWishlist
+    local list = self:GetMyList()
     local idx
     for i, e in ipairs(list) do
         if e.itemId == itemId then idx = i break end
@@ -257,10 +275,11 @@ end
 -- Guild broadcast — serialize and send this character's wishlist
 ----------------------------------------------------------------------
 function Wishlist:BroadcastMyWishlist()
-    if not BRutus.db or not BRutus.db.myWishlist then return end
+    if not BRutus.db then return end
+    local list = self:GetMyList()
     -- Do not broadcast (or store) an empty list — would create a ghost entry in every
     -- guildie's panel showing the character with 0 items.
-    if #BRutus.db.myWishlist == 0 then return end
+    if #list == 0 then return end
 
     local myName  = UnitName("player")
     local myClass = select(2, UnitClass("player")) or ""
@@ -273,7 +292,7 @@ function Wishlist:BroadcastMyWishlist()
     BRutus.db.guildWishlists[myKey] = {
         name     = myName,
         class    = myClass,
-        wishlist = BRutus.db.myWishlist,
+        wishlist = list,
     }
     self:RebuildItemIndex()
 
@@ -282,7 +301,7 @@ function Wishlist:BroadcastMyWishlist()
         local payload = {
             name     = myName,
             class    = myClass,
-            wishlist = BRutus.db.myWishlist,
+            wishlist = list,
         }
         local LibSerialize = LibStub("LibSerialize")
         local serialized  = LibSerialize:Serialize(payload)

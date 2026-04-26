@@ -1874,28 +1874,90 @@ local function BuildWishlistFrame()
     bottomBg:SetHeight(49)
     bottomBg:SetVertexColor(C.headerBg.r, C.headerBg.g, C.headerBg.b, 1.0)
 
-    -- MS/OS toggle
-    -- Layout (500px frame): [10] [osToggle 100] [6] [addBox 174] [6] [addBtn 88] [8] [syncBtn 80] [8]
-    -- Total: 10+100+6+174+6+88+8+80+8 = 480, centred with margins ✓
-    local osToggle = UI:CreateButton(f, "Adicionar MS", 100, 28)
-    osToggle:SetPoint("BOTTOMLEFT", 10, 11)
-    osToggle.isOS = false
-    osToggle:SetScript("OnClick", function(self)
-        self.isOS = not self.isOS
-        if self.isOS then
-            self.label:SetText("Adicionar OS")
-            self:SetBackdropColor(0.20, 0.20, 0.08, 0.8)
+    -- MS/OS radio buttons
+    -- Layout (500px frame): [10] [msBtn 56] [4] [osBtn 56] [6] [addBox 162] [6] [addBtn 88] [8] [syncBtn 80] [8]
+    -- Total: 10+56+4+56+6+162+6+88+8+80+8 = 484, centred with margins ✓
+    f.isOS = false   -- false = Main Spec, true = Off Spec
+
+    local msBtn = UI:CreateButton(f, "MS", 56, 28)
+    msBtn:SetPoint("BOTTOMLEFT", 10, 11)
+    -- Small dot indicator (6x6 texture, left of label)
+    local msDot = msBtn:CreateTexture(nil, "OVERLAY")
+    msDot:SetTexture("Interface\\Buttons\\WHITE8x8")
+    msDot:SetSize(6, 6)
+    msDot:SetPoint("RIGHT", msBtn.label, "LEFT", -4, 0)
+    msBtn.dot = msDot
+    f.msBtn = msBtn
+
+    local osBtn = UI:CreateButton(f, "OS", 56, 28)
+    osBtn:SetPoint("BOTTOMLEFT", msBtn, "BOTTOMRIGHT", 4, 0)
+    local osDot = osBtn:CreateTexture(nil, "OVERLAY")
+    osDot:SetTexture("Interface\\Buttons\\WHITE8x8")
+    osDot:SetSize(6, 6)
+    osDot:SetPoint("RIGHT", osBtn.label, "LEFT", -4, 0)
+    osBtn.dot = osDot
+    f.osBtn = osBtn
+
+    local function SetSpecType(isOS)
+        f.isOS = isOS
+        if isOS then
+            -- OS selected
+            msBtn.label:SetTextColor(C.silver.r, C.silver.g, C.silver.b)
+            msBtn.dot:SetVertexColor(0.3, 0.3, 0.3, 0.6)
+            msBtn:SetBackdropColor(0.05, 0.04, 0.08, 0.5)
+            msBtn:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.3)
+            osBtn.label:SetTextColor(C.gold.r, C.gold.g, C.gold.b)
+            osBtn.dot:SetVertexColor(C.gold.r, C.gold.g, C.gold.b, 1.0)
+            osBtn:SetBackdropColor(0.22, 0.16, 0.02, 0.9)
+            osBtn:SetBackdropBorderColor(C.gold.r, C.gold.g, C.gold.b, 1.0)
         else
-            self.label:SetText("Adicionar MS")
-            self:SetBackdropColor(C.accentDim.r, C.accentDim.g, C.accentDim.b, 0.6)
+            -- MS selected
+            msBtn.label:SetTextColor(1.0, 1.0, 1.0)
+            msBtn.dot:SetVertexColor(C.accent.r, C.accent.g, C.accent.b, 1.0)
+            msBtn:SetBackdropColor(C.accentDim.r, C.accentDim.g, C.accentDim.b, 0.9)
+            msBtn:SetBackdropBorderColor(C.accent.r, C.accent.g, C.accent.b, 1.0)
+            osBtn.label:SetTextColor(C.silver.r, C.silver.g, C.silver.b)
+            osBtn.dot:SetVertexColor(0.3, 0.3, 0.3, 0.6)
+            osBtn:SetBackdropColor(0.05, 0.04, 0.08, 0.5)
+            osBtn:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.3)
         end
+    end
+
+    msBtn:SetScript("OnClick", function() SetSpecType(false) end)
+    osBtn:SetScript("OnClick", function() SetSpecType(true)  end)
+
+    -- Override hover to preserve radio state visually
+    msBtn:SetScript("OnEnter", function(self)
+        self:SetBackdropBorderColor(C.gold.r, C.gold.g, C.gold.b, 1.0)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:ClearLines()
+        GameTooltip:AddLine("Main Spec", C.gold.r, C.gold.g, C.gold.b)
+        GameTooltip:AddLine("Item e prioridade para sua spec principal.", 1, 1, 1, true)
+        GameTooltip:Show()
     end)
-    f.osToggle = osToggle
+    msBtn:SetScript("OnLeave", function()
+        SetSpecType(f.isOS)
+        GameTooltip:Hide()
+    end)
+    osBtn:SetScript("OnEnter", function(self)
+        self:SetBackdropBorderColor(C.gold.r, C.gold.g, C.gold.b, 1.0)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:ClearLines()
+        GameTooltip:AddLine("Off Spec", C.gold.r, C.gold.g, C.gold.b)
+        GameTooltip:AddLine("Item e para uma spec secundaria.", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    osBtn:SetScript("OnLeave", function()
+        SetSpecType(f.isOS)
+        GameTooltip:Hide()
+    end)
+
+    SetSpecType(false)   -- initialise with MS selected
 
     -- Add item edit box
     local addBox = CreateFrame("EditBox", "BRutusWishAddBox", f, "BackdropTemplate")
-    addBox:SetSize(174, 28)
-    addBox:SetPoint("BOTTOMLEFT", osToggle, "BOTTOMRIGHT", 6, 0)
+    addBox:SetSize(162, 28)
+    addBox:SetPoint("BOTTOMLEFT", osBtn, "BOTTOMRIGHT", 6, 0)
     addBox:SetBackdrop({
         bgFile   = "Interface\\Buttons\\WHITE8x8",
         edgeFile = "Interface\\Buttons\\WHITE8x8",
@@ -2040,7 +2102,7 @@ local function BuildWishlistFrame()
             return
         end
         if BRutus.Wishlist then
-            BRutus.Wishlist:AddToWishlist(itemId, itemLink, f.osToggle.isOS)
+            BRutus.Wishlist:AddToWishlist(itemId, itemLink, f.isOS)
         end
         addBox:SetText("")
         addBox:ClearFocus()
@@ -2079,7 +2141,7 @@ function BRutus:ShowWishlistFrame()
     end
     -- Pre-request item info for all wishlist entries so the client
     -- fetches any uncached items before (or just after) we display them.
-    local list = (BRutus.db and BRutus.db.myWishlist) or {}
+    local list = (BRutus.Wishlist and BRutus.Wishlist:GetMyList()) or {}
     for _, entry in ipairs(list) do
         GetItemInfo(entry.itemId)
     end
@@ -2091,7 +2153,7 @@ function BRutus:RefreshWishlistFrame()
     local f = self.WishlistFrame
     if not f then return end
 
-    local rawList = (BRutus.db and BRutus.db.myWishlist) or {}
+    local rawList = (BRutus.Wishlist and BRutus.Wishlist:GetMyList()) or {}
 
     -- Split into active and delivered; delivered entries appear at the bottom.
     local active    = {}

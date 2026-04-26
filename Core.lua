@@ -145,7 +145,7 @@ local DB_DEFAULTS = {
     trials = {},
     altLinks = {},  -- [altKey] = mainKey  (officer-maintained, for account-wide attunement propagation)
     consumableChecks = { lastResults = {} },
-    myWishlist = {},  -- [{ itemId, itemLink, order, isOffspec }] — this character's wishlist entries
+    wishlists = {},   -- [charKey] = [{ itemId, itemLink, order, isOffspec }] — per-character wishlists
 
 }
 
