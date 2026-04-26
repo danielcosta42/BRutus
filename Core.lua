@@ -121,33 +121,30 @@ local DB_DEFAULTS = {
             recruitment = true,
             trialTracker = true,
             officerNotes = true,
-            tmb = true,
             commSystem = true,
         },
     },
     myData = {},
     lastSync = 0,
-    tmb = {
-        data = {},
-        itemNotes = {},
-        lastImport = 0,
-        importedBy = "",
-    },
+    guildWishlists = {},  -- [lowerName] = { name, class, wishlist = {} }
+    lootPrios = {},       -- [itemId(num)] = { {name, class, order}, ... } officer-set priorities
     raidTracker = {
         sessions = {},
         attendance = {},
+        currentGroupTag = "",
     },
     lootHistory = {},
     lootMaster = {
         rollDuration = 30,
         autoAnnounce = true,
-        tmbOnlyMode = false,
+        wishlistOnlyMode = false,
         awardHistory = {},
     },
     officerNotes = {},
     trials = {},
     altLinks = {},  -- [altKey] = mainKey  (officer-maintained, for account-wide attunement propagation)
     consumableChecks = { lastResults = {} },
+    myWishlist = {},  -- [{ itemId, itemLink, order, isOffspec }] — this character's wishlist entries
 
 }
 
@@ -293,8 +290,8 @@ function BRutus:InitModules()
     if BRutus.CommSystem and modEnabled("commSystem") then
         BRutus.CommSystem:Initialize()
     end
-    if BRutus.TMB and modEnabled("tmb") then
-        BRutus.TMB:Initialize()
+    if BRutus.Wishlist then
+        BRutus.Wishlist:Initialize()
     end
     if BRutus.RaidTracker and modEnabled("raidTracker") then
         BRutus.RaidTracker:Initialize()
@@ -358,6 +355,12 @@ function BRutus:OnEnterWorld()
         C_Timer.After(2, function()
             if BRutus.CommSystem then
                 BRutus.CommSystem:BroadcastMyData()
+            end
+        end)
+        -- Broadcast our wishlist so guildies can see our priorities
+        C_Timer.After(5, function()
+            if BRutus.Wishlist then
+                BRutus.Wishlist:BroadcastMyWishlist()
             end
         end)
         -- Check profession freshness after data is collected
@@ -452,9 +455,31 @@ SlashCmdList["BRUTUS"] = function(msg)
         if BRutus.RaidTracker then
             local json, err = BRutus.RaidTracker:ExportForTMB()
             if json then
-                BRutus:ShowExportPopup("TMB Attendance Export", json)
+                BRutus:ShowExportPopup("Export de Presença", json)
             else
                 BRutus:Print("|cffFF4444Export failed:|r " .. (err or "unknown error"))
+            end
+        end
+    elseif msg:match("^wish") then
+        local rest = strtrim(msg:gsub("^wish%s*", ""))
+        if rest == "" or rest == "list" then
+            -- Show wishlist frame
+            BRutus:ShowWishlistFrame()
+        elseif rest:match("^remove%s+") then
+            local link = rest:match("^remove%s+(.+)$")
+            local itemId = link and tonumber(link:match("item:(%d+)"))
+            if itemId and BRutus.Wishlist then
+                BRutus.Wishlist:RemoveFromWishlist(itemId)
+            else
+                BRutus:Print("Usage: /brutus wish remove [itemlink]")
+            end
+        else
+            -- Treat remainder as an item link to add
+            local itemId = tonumber(rest:match("item:(%d+)"))
+            if itemId and BRutus.Wishlist then
+                BRutus.Wishlist:AddToWishlist(itemId, rest, false)
+            else
+                BRutus:Print("Usage: /brutus wish [itemlink] | /brutus wish remove [itemlink]")
             end
         end
     elseif msg == "mergeraids" then

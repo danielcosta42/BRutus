@@ -179,9 +179,13 @@ function CommSystem:OnMessageReceived(msg, _, sender)
         self:HandlePing(sender)
     elseif msgType == CommSystem.MSG_TYPES.VERSION then
         self:HandleVersionCheck(sender, data)
-    elseif msgType == "TM" then
-        if BRutus.TMB then
-            BRutus.TMB:HandleTMBData(data)
+    elseif msgType == "WL" then
+        if BRutus.Wishlist then
+            BRutus.Wishlist:HandleWishlistBroadcast(sender, data)
+        end
+    elseif msgType == "LP" then
+        if BRutus.Wishlist then
+            BRutus.Wishlist:HandleLootPriosBroadcast(sender, data)
         end
     elseif msgType == "ON" then
         if BRutus.OfficerNotes then
@@ -332,7 +336,7 @@ end
 ----------------------------------------------------------------------
 -- Full sync: broadcast all data types in one staggered sequence
 -- Everyone: own data + request from peers
--- Officers: alt links, trials, raid data, TMB, officer notes
+-- Officers: alt links, trials, raid data, officer notes
 ----------------------------------------------------------------------
 function CommSystem:FullSync()
     if not IsInGuild() then
@@ -371,12 +375,6 @@ function CommSystem:FullSync()
     end)
 
     C_Timer.After(4, function()
-        if BRutus.TMB then
-            BRutus.TMB:BroadcastTMBData()
-        end
-    end)
-
-    C_Timer.After(5, function()
         if BRutus.OfficerNotes then
             BRutus.OfficerNotes:BroadcastAllNotes()
         end

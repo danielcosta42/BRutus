@@ -42,6 +42,7 @@ RaidTracker.currentRaid = nil
 RaidTracker.trackingActive = false
 RaidTracker.snapshotTimer = nil
 RaidTracker.endTimer = nil       -- grace-period timer before ending a session
+RaidTracker.currentGroupTag = ""  -- active raid group tag (e.g. "Core 1"); saved in DB
 
 -- Attendance penalty weights
 RaidTracker.PENALTIES = {
@@ -65,8 +66,16 @@ end
 
 function RaidTracker:Initialize()
     if not BRutus.db.raidTracker then
-        BRutus.db.raidTracker = { sessions = {}, attendance = {} }
+        BRutus.db.raidTracker = { sessions = {}, attendance = {}, currentGroupTag = "" }
     end
+
+    -- Ensure currentGroupTag field exists (added later)
+    local rtDB = BRutus.db.raidTracker
+    if rtDB.currentGroupTag == nil then rtDB.currentGroupTag = "" end
+    self.currentGroupTag = rtDB.currentGroupTag
+
+    -- One-time migration: detect old flat attendance structure and rebuild
+    self:MigrateAttendanceIfNeeded()
 
     local frame = CreateFrame("Frame")
     frame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
@@ -143,6 +152,7 @@ function RaidTracker:StartSession(instanceID)
     self.currentRaid = {
         instanceID = instanceID,
         name = raidName,
+        groupTag = self:GetCurrentGroup(),  -- tag this session with the active group
         startTime = GetServerTime(),
         endTime = nil,
         snapshots = {},
@@ -358,21 +368,65 @@ function RaidTracker:OnEncounterEnd(encounterID, encounterName, success)
     BRutus:Print(encounterName .. " - " .. status)
 end
 
-function RaidTracker:GetAttendance(playerKey)
-    local att = BRutus.db.raidTracker.attendance
-    if att and att[playerKey] then
-        return att[playerKey]
+----------------------------------------------------------------------
+-- Raid Group management
+-- groupTag is a persistent per-officer label ("Core 1", "Core 2", …).
+-- It tags sessions so attendance is tracked independently per group.
+----------------------------------------------------------------------
+function RaidTracker:GetCurrentGroup()
+    return self.currentGroupTag or ""
+end
+
+function RaidTracker:SetGroupTag(name)
+    name = name or ""
+    self.currentGroupTag = name
+    if BRutus.db and BRutus.db.raidTracker then
+        BRutus.db.raidTracker.currentGroupTag = name
+    end
+end
+
+-- Returns the group tag where the player has the most raids recorded.
+-- Used to auto-select the correct denominator when no group is specified.
+function RaidTracker:GetPlayerGroup(playerKey)
+    local att = BRutus.db.raidTracker and BRutus.db.raidTracker.attendance or {}
+    local bestGroup = ""
+    local bestRaids = 0
+    for groupTag, groupAtt in pairs(att) do
+        if type(groupAtt) == "table" then
+            local data = groupAtt[playerKey]
+            if data and (data.raids or 0) > bestRaids then
+                bestRaids = data.raids or 0
+                bestGroup = groupTag
+            end
+        end
+    end
+    return bestGroup
+end
+
+----------------------------------------------------------------------
+-- Attendance accessors (all group-aware)
+-- groupTag = nil → auto-detect from the player's primary group
+----------------------------------------------------------------------
+function RaidTracker:GetAttendance(playerKey, groupTag)
+    local att = BRutus.db.raidTracker and BRutus.db.raidTracker.attendance or {}
+    if not groupTag then groupTag = self:GetPlayerGroup(playerKey) end
+    local groupAtt = att[groupTag]
+    if groupAtt and groupAtt[playerKey] then
+        return groupAtt[playerKey]
     end
     return { raids = 0, lastRaid = 0 }
 end
 
-function RaidTracker:GetTotalSessions()
-    -- Count unique guild-raid lockouts (instance + reset week), not raw sessions.
+-- Count unique guild-raid lockouts for a group (or all groups if nil).
+function RaidTracker:GetTotalSessions(groupTag)
     local seen = {}
     for _, session in pairs(BRutus.db.raidTracker.sessions) do
         if session.isGuildRaid then
-            local key = (session.instanceID or 0) .. "_" .. self:GetWeekNum(session.startTime or 0)
-            seen[key] = true
+            local sg = session.groupTag or ""
+            if not groupTag or sg == groupTag then
+                local key = sg .. "|" .. (session.instanceID or 0) .. "_" .. self:GetWeekNum(session.startTime or 0)
+                seen[key] = true
+            end
         end
     end
     local count = 0
@@ -380,13 +434,16 @@ function RaidTracker:GetTotalSessions()
     return count
 end
 
-function RaidTracker:GetTotal25ManSessions()
-    -- Count unique 25-man guild-raid lockouts (instance + reset week).
+-- Count unique 25-man guild-raid lockouts for a group (or all groups if nil).
+function RaidTracker:GetTotal25ManSessions(groupTag)
     local seen = {}
     for _, session in pairs(BRutus.db.raidTracker.sessions) do
         if session.isGuildRaid and self:Is25Man(session.instanceID) then
-            local key = session.instanceID .. "_" .. self:GetWeekNum(session.startTime or 0)
-            seen[key] = true
+            local sg = session.groupTag or ""
+            if not groupTag or sg == groupTag then
+                local key = sg .. "|" .. session.instanceID .. "_" .. self:GetWeekNum(session.startTime or 0)
+                seen[key] = true
+            end
         end
     end
     local count = 0
@@ -394,26 +451,23 @@ function RaidTracker:GetTotal25ManSessions()
     return count
 end
 
-function RaidTracker:GetAttendancePercent(playerKey)
-    local total = self:GetTotalSessions()
+function RaidTracker:GetAttendancePercent(playerKey, groupTag)
+    if not groupTag then groupTag = self:GetPlayerGroup(playerKey) end
+    local total = self:GetTotalSessions(groupTag)
     if total == 0 then return 0 end
-    local att = self:GetAttendance(playerKey)
+    local att = self:GetAttendance(playerKey, groupTag)
     if att.raids == 0 then return 0 end
-
-    -- Use weighted score if available (100 = perfect session)
     if att.totalScore then
-        -- Average score across ALL sessions (absent sessions count as 0)
         return math.floor(att.totalScore / (total * 100) * 100 + 0.5)
     end
-
-    -- Fallback for old data without scores
     return math.floor((att.raids / total) * 100 + 0.5)
 end
 
-function RaidTracker:GetAttendance25ManPercent(playerKey)
-    local total = self:GetTotal25ManSessions()
+function RaidTracker:GetAttendance25ManPercent(playerKey, groupTag)
+    if not groupTag then groupTag = self:GetPlayerGroup(playerKey) end
+    local total = self:GetTotal25ManSessions(groupTag)
     if total == 0 then return 0 end
-    local att = self:GetAttendance(playerKey)
+    local att = self:GetAttendance(playerKey, groupTag)
     local raids25 = att.raids25 or 0
     if raids25 == 0 then return 0 end
     if att.totalScore25 then
@@ -454,14 +508,15 @@ function RaidTracker:MergeDuplicateSessions()
     local MERGE_WINDOW = 7200  -- sessions within 2h gap = same raid night
     local totalMerged = 0
 
-    -- Group sessions by instanceID
+    -- Group sessions by instanceID AND groupTag (don't merge sessions from different groups)
     local byInstance = {}
     for id, s in pairs(sessions) do
         if s and s.instanceID then
-            if not byInstance[s.instanceID] then
-                byInstance[s.instanceID] = {}
+            local bucketKey = (s.groupTag or "") .. "|" .. s.instanceID
+            if not byInstance[bucketKey] then
+                byInstance[bucketKey] = {}
             end
-            table.insert(byInstance[s.instanceID], { id = id, data = s })
+            table.insert(byInstance[bucketKey], { id = id, data = s })
         end
     end
 
@@ -554,22 +609,25 @@ end
 
 ----------------------------------------------------------------------
 -- Rebuild attendance table from scratch using saved sessions.
--- Sessions are grouped by lockout (instanceID + reset week) so that
--- multiple sessions in the same raid week count as ONE attendance event.
+-- Sessions are grouped by lockout (groupTag + instanceID + reset week)
+-- so that multiple sessions in the same raid week count as ONE event,
+-- and Core 1 / Core 2 lockouts are tracked independently.
 ----------------------------------------------------------------------
 function RaidTracker:RebuildAttendanceFromSessions()
     BRutus.db.raidTracker.attendance = {}
 
-    -- Group guild-raid sessions by lockout key
     local lockouts = {}
     local lockoutOrder = {}
     for _, session in pairs(BRutus.db.raidTracker.sessions) do
         if session.isGuildRaid then
             local weekNum    = self:GetWeekNum(session.startTime or 0)
-            local lockoutKey = (session.instanceID or 0) .. "_" .. weekNum
+            local groupTag   = session.groupTag or ""
+            -- Each group+instance+week is its own lockout; groups never share a lockout
+            local lockoutKey = groupTag .. "|" .. (session.instanceID or 0) .. "_" .. weekNum
             if not lockouts[lockoutKey] then
                 lockouts[lockoutKey] = {
                     instanceID = session.instanceID,
+                    groupTag   = groupTag,
                     sessions   = {},
                 }
                 table.insert(lockoutOrder, lockoutKey)
@@ -584,14 +642,18 @@ function RaidTracker:RebuildAttendanceFromSessions()
 end
 
 ----------------------------------------------------------------------
--- Compute attendance for ONE lockout (one raid per reset week).
--- All sessions in the lockout are merged; each player is counted once.
+-- Compute attendance for ONE lockout.
+-- Results are stored under attendance[groupTag][playerKey].
 ----------------------------------------------------------------------
 function RaidTracker:UpdateAttendanceForLockout(lockout)
     local att        = BRutus.db.raidTracker.attendance
     local instanceID = lockout.instanceID
+    local groupTag   = lockout.groupTag or ""
 
-    -- Merge players and snapshots from every session in this lockout
+    -- Ensure the group sub-table exists
+    if not att[groupTag] then att[groupTag] = {} end
+    local groupAtt = att[groupTag]
+
     local allPlayers   = {}
     local allSnapshots = {}
     local lastRaid     = 0
@@ -608,24 +670,22 @@ function RaidTracker:UpdateAttendanceForLockout(lockout)
         end
     end
 
-    -- Sort merged snapshots chronologically
     table.sort(allSnapshots, function(a, b) return (a.time or 0) < (b.time or 0) end)
 
     local firstSnap = allSnapshots[1]
     local lastSnap  = allSnapshots[#allSnapshots]
 
     for playerKey in pairs(allPlayers) do
-        if not att[playerKey] then
-            att[playerKey] = { raids = 0, lastRaid = 0, totalScore = 0 }
+        if not groupAtt[playerKey] then
+            groupAtt[playerKey] = { raids = 0, lastRaid = 0, totalScore = 0 }
         end
-        if not att[playerKey].totalScore then
-            att[playerKey].totalScore = att[playerKey].raids * 100
+        if not groupAtt[playerKey].totalScore then
+            groupAtt[playerKey].totalScore = groupAtt[playerKey].raids * 100
         end
 
-        att[playerKey].raids   = att[playerKey].raids + 1
-        att[playerKey].lastRaid = math.max(att[playerKey].lastRaid, lastRaid)
+        groupAtt[playerKey].raids   = groupAtt[playerKey].raids + 1
+        groupAtt[playerKey].lastRaid = math.max(groupAtt[playerKey].lastRaid, lastRaid)
 
-        -- Score: start at 100, apply penalties across merged snapshot span
         local score = 100
         if firstSnap and firstSnap.members and not firstSnap.members[playerKey] then
             score = score - self.PENALTIES.LATE
@@ -646,11 +706,11 @@ function RaidTracker:UpdateAttendanceForLockout(lockout)
             score = score - self.PENALTIES.NO_CONSUMES
         end
         score = math.max(0, math.min(100, score))
-        att[playerKey].totalScore = att[playerKey].totalScore + score
+        groupAtt[playerKey].totalScore = groupAtt[playerKey].totalScore + score
 
         if self:Is25Man(instanceID) then
-            att[playerKey].raids25      = (att[playerKey].raids25 or 0) + 1
-            att[playerKey].totalScore25 = (att[playerKey].totalScore25 or 0) + score
+            groupAtt[playerKey].raids25      = (groupAtt[playerKey].raids25 or 0) + 1
+            groupAtt[playerKey].totalScore25 = (groupAtt[playerKey].totalScore25 or 0) + score
         end
     end
 end
@@ -659,23 +719,23 @@ function RaidTracker:DeleteSession(sessionID)
     local session = BRutus.db.raidTracker.sessions[sessionID]
     if not session then return end
 
-    -- Decrement attendance for players in this session
-    -- Since we don't store per-session scores, estimate 100 per removed session
+    local groupTag = session.groupTag or ""
+    local att = BRutus.db.raidTracker.attendance or {}
+    local groupAtt = att[groupTag] or {}
+
     for playerKey in pairs(session.players) do
-        local att = BRutus.db.raidTracker.attendance[playerKey]
-        if att then
-            att.raids = math.max(0, att.raids - 1)
-            if att.totalScore then
-                -- Approximate: remove average score per session for this player
-                local avgScore = att.raids > 0 and (att.totalScore / (att.raids + 1)) or 100
-                att.totalScore = math.max(0, att.totalScore - avgScore)
+        local pAtt = groupAtt[playerKey]
+        if pAtt then
+            pAtt.raids = math.max(0, pAtt.raids - 1)
+            if pAtt.totalScore then
+                local avgScore = pAtt.raids > 0 and (pAtt.totalScore / (pAtt.raids + 1)) or 100
+                pAtt.totalScore = math.max(0, pAtt.totalScore - avgScore)
             end
-            -- Also decrement 25-man counters if applicable
             if self:Is25Man(session.instanceID) then
-                att.raids25 = math.max(0, (att.raids25 or 1) - 1)
-                if att.totalScore25 then
-                    local avg25 = att.raids25 > 0 and (att.totalScore25 / (att.raids25 + 1)) or 100
-                    att.totalScore25 = math.max(0, att.totalScore25 - avg25)
+                pAtt.raids25 = math.max(0, (pAtt.raids25 or 1) - 1)
+                if pAtt.totalScore25 then
+                    local avg25 = pAtt.raids25 > 0 and (pAtt.totalScore25 / (pAtt.raids25 + 1)) or 100
+                    pAtt.totalScore25 = math.max(0, pAtt.totalScore25 - avg25)
                 end
             end
         end
@@ -709,6 +769,7 @@ function RaidTracker:BroadcastRaidData()
         payload.sessions[sessionID] = {
             instanceID = session.instanceID,
             name       = session.name,
+            groupTag   = session.groupTag or "",
             startTime  = session.startTime,
             endTime    = session.endTime,
             players    = session.players,
@@ -732,21 +793,28 @@ function RaidTracker:HandleIncoming(data)
     if not raidDB.attendance then raidDB.attendance = {} end
     if not raidDB.sessions   then raidDB.sessions   = {} end
 
-    -- Merge attendance: keep higher raid count; on tie prefer most recent lastRaid
-    for playerKey, incoming in pairs(payload.attendance or {}) do
-        local existing = raidDB.attendance[playerKey]
-        if not existing then
-            raidDB.attendance[playerKey] = incoming
-        else
-            local inRaids = incoming.raids or 0
-            local exRaids = existing.raids or 0
-            if inRaids > exRaids then
-                raidDB.attendance[playerKey] = incoming
-            elseif inRaids == exRaids then
-                local inTime = incoming.lastRaid or 0
-                local exTime = existing.lastRaid or 0
-                if inTime > exTime then
-                    raidDB.attendance[playerKey] = incoming
+    -- Merge attendance: nested by groupTag → playerKey
+    -- Keep higher raid count; on tie prefer most recent lastRaid
+    for groupTag, incomingGroup in pairs(payload.attendance or {}) do
+        if type(incomingGroup) == "table" then
+            if not raidDB.attendance[groupTag] then
+                raidDB.attendance[groupTag] = {}
+            end
+            local localGroup = raidDB.attendance[groupTag]
+            for playerKey, incoming in pairs(incomingGroup) do
+                local existing = localGroup[playerKey]
+                if not existing then
+                    localGroup[playerKey] = incoming
+                else
+                    local inRaids = incoming.raids or 0
+                    local exRaids = existing.raids or 0
+                    if inRaids > exRaids then
+                        localGroup[playerKey] = incoming
+                    elseif inRaids == exRaids then
+                        if (incoming.lastRaid or 0) > (existing.lastRaid or 0) then
+                            localGroup[playerKey] = incoming
+                        end
+                    end
                 end
             end
         end
@@ -761,23 +829,28 @@ function RaidTracker:HandleIncoming(data)
 end
 
 ----------------------------------------------------------------------
--- Export attendance data as TMB-compatible JSON
--- TMB expects: { "character_name": { "attendance_percentage": N }, ... }
+-- Export attendance data as TMB-compatible JSON.
+-- groupTag = nil → use the current active group tag.
 ----------------------------------------------------------------------
-function RaidTracker:ExportForTMB()
-    local total = self:GetTotal25ManSessions()
-    if total == 0 then return nil, "No 25-man raid sessions recorded." end
+function RaidTracker:ExportForTMB(groupTag)
+    groupTag = groupTag or self:GetCurrentGroup()
+    local total = self:GetTotal25ManSessions(groupTag)
+    if total == 0 then
+        local label = groupTag ~= "" and groupTag or "padrão"
+        return nil, "Nenhuma raid de 25 registrada para o grupo: " .. label
+    end
 
     local att = BRutus.db.raidTracker.attendance or {}
+    local groupAtt = att[groupTag] or {}
     local lines = {}
     table.insert(lines, "{")
 
     local entries = {}
-    for playerKey, data in pairs(att) do
+    for playerKey, data in pairs(groupAtt) do
         local name = playerKey:match("^([^-]+)")
         local raids25 = data.raids25 or 0
         if name and raids25 > 0 then
-            local pct = self:GetAttendance25ManPercent(playerKey)
+            local pct = self:GetAttendance25ManPercent(playerKey, groupTag)
             table.insert(entries, {
                 name = name,
                 pct = pct,
@@ -795,4 +868,23 @@ function RaidTracker:ExportForTMB()
 
     table.insert(lines, "}")
     return table.concat(lines, "\n"), nil
+end
+
+----------------------------------------------------------------------
+-- One-time migration: detect old flat attendance format and rebuild.
+-- Old format: attendance[playerKey] = { raids, lastRaid, ... }
+-- New format: attendance[groupTag][playerKey] = { raids, lastRaid, ... }
+----------------------------------------------------------------------
+function RaidTracker:MigrateAttendanceIfNeeded()
+    local att = BRutus.db.raidTracker and BRutus.db.raidTracker.attendance or {}
+    for _, v in pairs(att) do
+        if type(v) == "table" and (v.raids ~= nil or v.lastRaid ~= nil or v.raids25 ~= nil) then
+            -- Old flat format detected
+            BRutus:Print("|cffFFAA00BRutus: Detectada attendance no formato antigo. Reconstruindo por grupo…|r")
+            self:RebuildAttendanceFromSessions()
+            return
+        end
+        -- Only need to inspect one entry; if it's a subtable (new format) we're good
+        break
+    end
 end

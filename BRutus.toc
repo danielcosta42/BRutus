@@ -25,7 +25,7 @@ DataCollector.lua
 AttunementTracker.lua
 CommSystem.lua
 RecruitmentSystem.lua
-TMBIntegration.lua
+WishlistSystem.lua
 RaidTracker.lua
 LootTracker.lua
 LootMaster.lua

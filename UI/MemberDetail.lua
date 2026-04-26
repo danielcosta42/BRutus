@@ -421,105 +421,37 @@ function PopulateDetail(frame, data)
     end
 
     ----------------------------------------------------------------
-    -- Section: TMB Loot (That's My BiS)
+    -- Section: Wishlist (nativa)
     ----------------------------------------------------------------
-    local tmbData = BRutus.TMB and BRutus.TMB:GetCharacterData(data.name)
-    if tmbData then
+    local guildKey = strlower(data.name or "")
+    local wishData = BRutus.db.guildWishlists and BRutus.db.guildWishlists[guildKey]
+    if wishData and wishData.wishlist and #wishData.wishlist > 0 then
         yOff = yOff - 10
-        local tmbParts = {}
-        if #tmbData.prios > 0 then table.insert(tmbParts, #tmbData.prios .. " prio") end
-        if #tmbData.wishlists > 0 then table.insert(tmbParts, #tmbData.wishlists .. " wish") end
-        if #tmbData.received > 0 then table.insert(tmbParts, #tmbData.received .. " recv") end
-        local tmbHeader = "THAT'S MY BIS" .. (#tmbParts > 0 and ("  --  " .. table.concat(tmbParts, " / ")) or "")
-        yOff = CreateSectionHeader(child, tmbHeader, yOff, contentWidth)
+        local wishHeader = "WISHLIST  --  " .. #wishData.wishlist .. " item(s)"
+        yOff = CreateSectionHeader(child, wishHeader, yOff, contentWidth)
         yOff = yOff - 5
 
-        local TMBColors = BRutus.TMB.TypeColors
+        local wColor = BRutus.Wishlist and BRutus.Wishlist.TypeColors.wishlist or { r=0.3, g=0.7, b=1.0 }
 
-        -- Prios
-        if #tmbData.prios > 0 then
-            local prioLabel = child:CreateFontString(nil, "OVERLAY")
-            prioLabel:SetFont("Fonts\\FRIZQT__.TTF", 9, "OUTLINE")
-            prioLabel:SetPoint("TOPLEFT", 10, yOff)
-            prioLabel:SetTextColor(TMBColors.prio.r, TMBColors.prio.g, TMBColors.prio.b)
-            prioLabel:SetText("PRIO:")
-            prioLabel:Show()
-            yOff = yOff - 14
-
-            for _, item in ipairs(tmbData.prios) do
-                local qColor = BRutus.QualityColors[BRutus.TMB:GetItemQuality(item.itemId)] or BRutus.QualityColors[1]
-                local itemStr = child:CreateFontString(nil, "OVERLAY")
-                itemStr:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
-                itemStr:SetPoint("TOPLEFT", 20, yOff)
-                itemStr:SetWidth(contentWidth - 30)
-                itemStr:SetJustifyH("LEFT")
-                itemStr:SetWordWrap(false)
-                local osStr = item.isOffspec and " |cffAAAAAA(OS)|r" or ""
-                itemStr:SetText(string.format("|cff%02x%02x%02x#%d %s|r%s",
-                    qColor.r * 255, qColor.g * 255, qColor.b * 255,
-                    item.order, BRutus.TMB:GetItemName(item.itemId), osStr))
-                itemStr:Show()
-                CreateItemTooltipZone(child, itemStr, item.itemId)
-                yOff = yOff - 15
+        for _, item in ipairs(wishData.wishlist) do
+            local qColor = C.white
+            if BRutus.Wishlist and BRutus.QualityColors then
+                local q = BRutus.Wishlist:GetItemQuality(item.itemId)
+                qColor = BRutus.QualityColors[q] or C.white
             end
-            yOff = yOff - 4
-        end
-
-        -- Wishlists
-        if #tmbData.wishlists > 0 then
-            local wishLabel = child:CreateFontString(nil, "OVERLAY")
-            wishLabel:SetFont("Fonts\\FRIZQT__.TTF", 9, "OUTLINE")
-            wishLabel:SetPoint("TOPLEFT", 10, yOff)
-            wishLabel:SetTextColor(TMBColors.wishlist.r, TMBColors.wishlist.g, TMBColors.wishlist.b)
-            wishLabel:SetText("WISHLIST:")
-            wishLabel:Show()
-            yOff = yOff - 14
-
-            for _, item in ipairs(tmbData.wishlists) do
-                local qColor = BRutus.QualityColors[BRutus.TMB:GetItemQuality(item.itemId)] or BRutus.QualityColors[1]
-                local itemStr = child:CreateFontString(nil, "OVERLAY")
-                itemStr:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
-                itemStr:SetPoint("TOPLEFT", 20, yOff)
-                itemStr:SetWidth(contentWidth - 30)
-                itemStr:SetJustifyH("LEFT")
-                itemStr:SetWordWrap(false)
-                local osStr = item.isOffspec and " |cffAAAAAA(OS)|r" or ""
-                itemStr:SetText(string.format("|cff%02x%02x%02x#%d %s|r%s",
-                    qColor.r * 255, qColor.g * 255, qColor.b * 255,
-                    item.order, BRutus.TMB:GetItemName(item.itemId), osStr))
-                itemStr:Show()
-                CreateItemTooltipZone(child, itemStr, item.itemId)
-                yOff = yOff - 15
-            end
-            yOff = yOff - 4
-        end
-
-        -- Received
-        if #tmbData.received > 0 then
-            local recvLabel = child:CreateFontString(nil, "OVERLAY")
-            recvLabel:SetFont("Fonts\\FRIZQT__.TTF", 9, "OUTLINE")
-            recvLabel:SetPoint("TOPLEFT", 10, yOff)
-            recvLabel:SetTextColor(TMBColors.received.r, TMBColors.received.g, TMBColors.received.b)
-            recvLabel:SetText("RECEIVED:")
-            recvLabel:Show()
-            yOff = yOff - 14
-
-            for _, item in ipairs(tmbData.received) do
-                local qColor = BRutus.QualityColors[BRutus.TMB:GetItemQuality(item.itemId)] or BRutus.QualityColors[1]
-                local itemStr = child:CreateFontString(nil, "OVERLAY")
-                itemStr:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
-                itemStr:SetPoint("TOPLEFT", 20, yOff)
-                itemStr:SetWidth(contentWidth - 30)
-                itemStr:SetJustifyH("LEFT")
-                itemStr:SetWordWrap(false)
-                local dateStr = item.receivedAt and item.receivedAt ~= "" and (" |cffAAAAAA" .. item.receivedAt .. "|r") or ""
-                itemStr:SetText(string.format("|cff%02x%02x%02x%s|r%s",
-                    qColor.r * 255, qColor.g * 255, qColor.b * 255,
-                    BRutus.TMB:GetItemName(item.itemId), dateStr))
-                itemStr:Show()
-                CreateItemTooltipZone(child, itemStr, item.itemId)
-                yOff = yOff - 15
-            end
+            local localName = BRutus.Wishlist and BRutus.Wishlist:GetItemName(item.itemId) or ("Item #" .. (item.itemId or "?"))
+            local osStr = item.isOffspec and " |cffAAAAAA(OS)|r" or ""
+            local itemStr = child:CreateFontString(nil, "OVERLAY")
+            itemStr:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
+            itemStr:SetPoint("TOPLEFT", 20, yOff)
+            itemStr:SetWidth(contentWidth - 30)
+            itemStr:SetJustifyH("LEFT")
+            itemStr:SetWordWrap(false)
+            itemStr:SetTextColor(qColor.r, qColor.g, qColor.b)
+            itemStr:SetText(string.format("#%d %s%s", item.order or 0, localName, osStr))
+            itemStr:Show()
+            CreateItemTooltipZone(child, itemStr, item.itemId)
+            yOff = yOff - 15
         end
     end
 
@@ -529,11 +461,14 @@ function PopulateDetail(frame, data)
     if BRutus.RaidTracker then
         yOff = yOff - 10
         playerKey = BRutus:GetPlayerKey(data.name, data.realm or GetRealmName())
-        local att          = BRutus.RaidTracker:GetAttendance(playerKey)
-        local pct          = BRutus.RaidTracker:GetAttendance25ManPercent(playerKey)
-        local total25      = BRutus.RaidTracker:GetTotal25ManSessions()
+        local playerGroup  = BRutus.RaidTracker:GetPlayerGroup(playerKey)
+        local att          = BRutus.RaidTracker:GetAttendance(playerKey, playerGroup)
+        local pct          = BRutus.RaidTracker:GetAttendance25ManPercent(playerKey, playerGroup)
+        local total25      = BRutus.RaidTracker:GetTotal25ManSessions(playerGroup)
         local raids25      = att.raids25 or 0
-        local attStr = string.format("RAID ATTENDANCE  --  %d%%  (%d/%d raids, 25-man)", pct, raids25, total25)
+        local groupSuffix  = playerGroup ~= "" and ("  [" .. playerGroup .. "]") or ""
+        local attStr = string.format("RAID ATTENDANCE%s  --  %d%%  (%d/%d raids, 25-man)",
+            groupSuffix, pct, raids25, total25)
         yOff = CreateSectionHeader(child, attStr, yOff, contentWidth)
 
         if att.lastRaid > 0 then
@@ -566,14 +501,10 @@ function PopulateDetail(frame, data)
             itemStr:SetWidth(contentWidth - 30)
             itemStr:SetJustifyH("LEFT")
             itemStr:SetWordWrap(false)
-            -- Resolve item name locally from itemLink
-            local displayName = entry.itemName or "?"
-            if entry.itemLink then
-                local localName = entry.itemLink:match("%[(.-)%]")
-                if localName and localName ~= "" then
-                    displayName = localName
-                end
-            end
+            -- Resolve item name via GetItemInfo for correct client locale.
+            -- GetItemInfo accepts itemLink directly, so no need to parse the ID.
+            local localItemName = GetItemInfo(entry.itemLink or entry.itemId or 0)
+            local displayName = localItemName or entry.itemName or "?"
             local dateStr = entry.timestamp and (" |cffAAAAAA" .. date("%m/%d", entry.timestamp) .. "|r") or ""
             local raidStr = entry.raid and entry.raid ~= "" and (" |cff888888(" .. entry.raid .. ")|r") or ""
             itemStr:SetText(string.format("|cff%02x%02x%02x%s|r%s%s",

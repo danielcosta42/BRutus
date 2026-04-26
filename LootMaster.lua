@@ -1,7 +1,7 @@
 ----------------------------------------------------------------------
 -- BRutus Guild Manager - Loot Master (Gargul-style)
 -- Master Looter announces items, players roll MS/OS, ML awards loot.
--- Integrates with TMB wishlists to show prio/interest on items.
+-- Integrates with wishlists to show interest on items.
 ----------------------------------------------------------------------
 local LootMaster = {}
 BRutus.LootMaster = LootMaster
@@ -13,7 +13,7 @@ LootMaster.ROLL_PASS   = "PASS"
 
 -- State
 LootMaster.activeLoot        = nil    -- currently announced item
-LootMaster.rolls             = {}     -- [playerKey] = { name, class, rollType, roll, tmb }
+LootMaster.rolls             = {}     -- [playerKey] = { name, class, rollType, roll }
 LootMaster.rollTimer         = nil
 LootMaster.isMLSession       = false
 LootMaster.lootWindowOpen    = false  -- tracks whether loot window is open
@@ -23,17 +23,18 @@ LootMaster.awardHistory      = {}     -- recent awards for undo
 LootMaster.pendingTrades     = {}     -- items awaiting trade: [itemId] = { player, link, itemId, timestamp }
 LootMaster.testMode          = false  -- when true, bypasses raid/ML checks for local testing
 LootMaster.rollPattern       = nil    -- built in Initialize() from RANDOM_ROLL_RESULT
+LootMaster.disenchanter      = ""     -- per-raid only; cleared on group leave (not saved to DB)
 
 -- Config defaults
 LootMaster.ROLL_DURATION = 30     -- seconds to wait for rolls
 LootMaster.AUTO_ANNOUNCE = true   -- auto-announce when ML loot window opens
-LootMaster.TMB_ONLY_MODE = false  -- only show roll popup to players with item at top of TMB list
+LootMaster.WISHLIST_ONLY_MODE = false  -- only show roll popup to players with item on their wishlist
 
 ----------------------------------------------------------------------
 -- Safe wrappers: send to raid if in raid, else print locally
 ----------------------------------------------------------------------
 function LootMaster:SafeSendChat(msg, channel)
-    if IsInRaid() then
+    if IsInRaid() and not self.testMode then
         SendChatMessage(msg, channel)
     else
         BRutus:Print("|cff888888[" .. (channel or "CHAT") .. "]|r " .. msg)
@@ -41,7 +42,7 @@ function LootMaster:SafeSendChat(msg, channel)
 end
 
 function LootMaster:SafeSendAddon(prefix, payload, channel)
-    if IsInRaid() then
+    if IsInRaid() and not self.testMode then
         C_ChatInfo.SendAddonMessage(prefix, payload, channel)
     end
 end
@@ -54,14 +55,14 @@ function LootMaster:Initialize()
         BRutus.db.lootMaster = {
             rollDuration = 30,
             autoAnnounce = true,
-            tmbOnlyMode = false,
+            wishlistOnlyMode = false,
             awardHistory = {},
         }
     end
 
     self.ROLL_DURATION = BRutus.db.lootMaster.rollDuration or 30
     self.AUTO_ANNOUNCE = BRutus.db.lootMaster.autoAnnounce
-    self.TMB_ONLY_MODE = BRutus.db.lootMaster.tmbOnlyMode or false
+    self.WISHLIST_ONLY_MODE = BRutus.db.lootMaster.wishlistOnlyMode or false
     self.pendingTrades = {}
 
     -- Ensure loot-distribution settings exist (added in v2)
@@ -69,6 +70,7 @@ function LootMaster:Initialize()
     if lmdb.minAttendancePct == nil then lmdb.minAttendancePct = 0    end
     if lmdb.attTiebreaker    == nil then lmdb.attTiebreaker    = true end
     if lmdb.recvPenalty      == nil then lmdb.recvPenalty      = true end
+    if lmdb.awardHistory     == nil then lmdb.awardHistory     = {}   end
 
     -- Build /roll detection pattern from localized RANDOM_ROLL_RESULT global
     -- e.g. EN: "%s rolls %d (%d-%d)."  → ^(.+) rolls (%d+) %((%d+)%-(%d+)%)%.$
@@ -86,7 +88,7 @@ function LootMaster:Initialize()
     frame:RegisterEvent("CHAT_MSG_SYSTEM")  -- capture /roll results
     frame:RegisterEvent("TRADE_SHOW")
     frame:RegisterEvent("TRADE_ACCEPT_UPDATE")
-    frame:RegisterEvent("UI_ERROR_MESSAGE")
+    frame:RegisterEvent("GROUP_LEFT")       -- clear disenchanter when raid ends
     frame:SetScript("OnEvent", function(_, event, ...)
         if event == "LOOT_OPENED" then
             LootMaster:OnLootOpened()
@@ -100,6 +102,8 @@ function LootMaster:Initialize()
             LootMaster:OnTradeShow()
         elseif event == "TRADE_ACCEPT_UPDATE" then
             LootMaster:OnTradeAcceptUpdate(...)
+        elseif event == "GROUP_LEFT" then
+            LootMaster.disenchanter = ""
         end
     end)
 
@@ -121,13 +125,8 @@ function LootMaster:GetPlayerContext(playerName)
         ctx.att25 = BRutus.RaidTracker:GetAttendance25ManPercent(pKey) or 0
     end
 
-    -- Items received this lockout (same instance + TBC reset week)
-    if BRutus.TMB then
-        local _, _, _, _, _, _, _, instID = GetInstanceInfo()
-        local wNum = BRutus.RaidTracker
-            and BRutus.RaidTracker:GetWeekNum(GetServerTime()) or 0
-        ctx.recvThisLockout = BRutus.TMB:GetReceivedThisLockout(playerName, instID, wNum)
-    end
+    -- Items received this lockout
+    ctx.recvThisLockout = 0
 
     return ctx
 end
@@ -262,7 +261,7 @@ function LootMaster:OnLootOpened()
     local numItems = GetNumLootItems()
     local items = {}
     for i = 1, numItems do
-        local _, itemName, _, _, quality = GetLootSlotInfo(i)
+        local _, itemName, _, quality = GetLootSlotInfo(i)  -- TBC: icon, name, count, quality, locked
         if quality and quality >= 3 then
             local link = GetLootSlotLink(i)
             if link then
@@ -287,42 +286,25 @@ function LootMaster:OnLootClosed()
 end
 
 ----------------------------------------------------------------------
--- Check if current player has itemId ANYWHERE in their TMB prio or wishlist
+-- Check if current player has itemId on their native wishlist
 ----------------------------------------------------------------------
-function LootMaster:PlayerHasItemOnTMB(itemId)
-    if not BRutus.TMB then return false end
-    local myName = UnitName("player")
-    if not myName then return false end
-
-    local charData = BRutus.TMB:GetCharacterData(myName)
-    if not charData then return false end
-
-    -- Check prio list
-    if charData.prios then
-        for _, entry in ipairs(charData.prios) do
-            if entry.itemId == itemId then return true end
-        end
+function LootMaster:PlayerHasItemOnWishlist(itemId)
+    if not BRutus.db or not BRutus.db.myWishlist then return false end
+    for _, entry in ipairs(BRutus.db.myWishlist) do
+        if entry.itemId == itemId then return true end
     end
-
-    -- Check wishlist
-    if charData.wishlists then
-        for _, entry in ipairs(charData.wishlists) do
-            if entry.itemId == itemId then return true end
-        end
-    end
-
     return false
 end
 
 ----------------------------------------------------------------------
--- Resolve TMB council for an item: returns sorted list of interested
--- raiders currently in raid, or nil if no TMB data.
--- Each entry: { name, class, type ("prio"/"wishlist"), order }
+-- Resolve wishlist council for an item: returns sorted list of interested
+-- raiders currently in raid, or nil if no wishlist data.
+-- Each entry: { name, class, type ("wishlist"), order }
 ----------------------------------------------------------------------
-function LootMaster:ResolveTMBCouncil(itemId)
-    if not BRutus.TMB or not itemId or itemId == 0 then return nil end
+function LootMaster:ResolveWishlistCouncil(itemId)
+    if not BRutus.Wishlist or not itemId or itemId == 0 then return nil end
 
-    local interest = BRutus.TMB:GetItemInterest(itemId)
+    local interest = BRutus.Wishlist:GetItemInterest(itemId)
     if not interest or #interest == 0 then return nil end
 
     -- Build set of players currently in raid
@@ -334,29 +316,66 @@ function LootMaster:ResolveTMBCouncil(itemId)
             inRaid[strlower(name)] = select(2, UnitClass("raid" .. i)) or "UNKNOWN"
         end
     end
+    -- In testMode, treat the current player as in raid so council logic is testable
+    if self.testMode then
+        local myName = UnitName("player")
+        if myName then
+            inRaid[strlower(myName)] = select(2, UnitClass("player")) or "UNKNOWN"
+        end
+    end
 
-    -- Filter TMB interest to only raiders present, exclude "received"
+    -- Filter to only raiders present
     local candidates = {}
     for _, entry in ipairs(interest) do
-        if entry.type ~= "received" and inRaid[strlower(entry.name)] then
+        if inRaid[strlower(entry.name)] then
             table.insert(candidates, {
-                name = entry.name,
-                class = inRaid[strlower(entry.name)],
-                tmbType = entry.type,
-                order = entry.order or 999,
+                name        = entry.name,
+                class       = inRaid[strlower(entry.name)],
+                wishlistType = "wishlist",
+                order       = entry.order or 999,
             })
         end
     end
 
-    -- Already sorted by itemIndex (prio first, then wishlist, by order)
     return (#candidates > 0) and candidates or nil
 end
 
 ----------------------------------------------------------------------
+-- Resolve officer prio list for an item: returns ordered list of entries
+-- currently in raid, in prio order. Returns nil if no prio data.
+----------------------------------------------------------------------
+function LootMaster:ResolvePrioList(itemId)
+    if not BRutus.db or not BRutus.db.lootPrios then return nil end
+    local prioList = BRutus.db.lootPrios[itemId]
+    if not prioList or #prioList == 0 then return nil end
+
+    -- Build set of players currently in raid
+    local inRaid = {}
+    local numMembers = GetNumGroupMembers()
+    for i = 1, numMembers do
+        local name = UnitName("raid" .. i)
+        if name then inRaid[strlower(name)] = true end
+    end
+    if self.testMode then
+        local myName = UnitName("player")
+        if myName then inRaid[strlower(myName)] = true end
+    end
+
+    -- Return only prio entries for raiders present, in order
+    local result = {}
+    for _, entry in ipairs(prioList) do
+        if inRaid[strlower(entry.name or "")] then
+            table.insert(result, entry)
+        end
+    end
+    return #result > 0 and result or nil
+end
+
+----------------------------------------------------------------------
 -- Announce an item for rolling.
--- Priority logic (always active, regardless of TMB_ONLY_MODE):
---   ≥ 2 players tied at top TMB prio in raid → restricted roll (only they roll)
---   1 clear winner + TMB_ONLY_MODE           → AutoCouncilAward (direct award prompt)
+-- Priority logic (always active, regardless of WISHLIST_ONLY_MODE):
+--   ≥ 2 players tied at top wishlist position in raid → restricted roll (only they roll)
+--   1 clear winner + WISHLIST_ONLY_MODE          → AutoCouncilAward (direct award prompt)
 --   otherwise                                 → open MS/OS roll for all
 ----------------------------------------------------------------------
 function LootMaster:AnnounceItem(itemLink, lootSlot)
@@ -378,52 +397,76 @@ function LootMaster:AnnounceItem(itemLink, lootSlot)
     local itemId = tonumber(itemLink:match("item:(%d+)"))
     self.activeLoot.itemId = itemId
 
-    -- Always check TMB for tied top-priority players currently in raid
+    -- Check officer prios first — they override wishlist council
     if itemId and itemId > 0 then
-        local council = self:ResolveTMBCouncil(itemId)
+        local prioList = self:ResolvePrioList(itemId)
+        if prioList then
+            local topPrio = prioList[1]
+            if self.WISHLIST_ONLY_MODE then
+                -- Direct award prompt for top prio player
+                local council = self:ResolveWishlistCouncil(itemId) or {}
+                self:AutoCouncilAward(
+                    { name = topPrio.name, class = topPrio.class or "UNKNOWN", order = 1, isPrio = true },
+                    itemLink, lootSlot, council)
+            else
+                -- Open roll but announce prio info
+                self:DoNormalAnnounce(itemLink, lootSlot, itemId, nil, topPrio)
+            end
+            return
+        end
+    end
+
+    -- No officer prio — check wishlist interest for tied top entries currently in raid
+    if itemId and itemId > 0 then
+        local council = self:ResolveWishlistCouncil(itemId)
         if council then
             local top  = council[1]
             local tied = {}
             for _, c in ipairs(council) do
-                if c.tmbType == top.tmbType and c.order == top.order then
+                if c.order == top.order then
                     table.insert(tied, c)
                 end
             end
 
             if #tied >= 2 then
-                -- Tie at top priority: only those players roll
+                -- Tie at top of wishlist: only those players roll
                 self:StartRestrictedRoll(tied, council, itemLink, lootSlot, itemId)
                 return
-            elseif #tied == 1 and self.TMB_ONLY_MODE then
-                -- Single clear winner + TMB-only mode: prompt ML for direct award
+            elseif #tied == 1 and self.WISHLIST_ONLY_MODE then
+                -- Single top entry + wishlist-only mode: prompt ML for direct award
                 self:AutoCouncilAward(top, itemLink, lootSlot, council)
                 return
             end
-            -- Single winner but TMB_ONLY_MODE off: open roll for all, mention winner
-            self:DoNormalAnnounce(itemLink, lootSlot, itemId, top)
+            -- Single top entry but WISHLIST_ONLY_MODE off: open roll, mention winner
+            self:DoNormalAnnounce(itemLink, lootSlot, itemId, top, nil)
             return
         end
     end
 
-    -- No TMB data for this item: open roll for all
-    self:DoNormalAnnounce(itemLink, lootSlot, itemId, nil)
+    -- No wishlist data for this item: open roll for all
+    self:DoNormalAnnounce(itemLink, lootSlot, itemId, nil, nil)
 end
 
 ----------------------------------------------------------------------
 -- Normal announce — open MS/OS roll for everyone in the raid.
--- topPrioEntry (optional): TMB entry of the single top-prio player, used
--- to post an info line about who has priority (without restricting rolls).
+-- topEntry (optional): wishlist entry of the single top player.
+-- prioEntry (optional): officer prio entry of the top prio player.
+-- One of these is used to post an info line about who has priority.
 ----------------------------------------------------------------------
-function LootMaster:DoNormalAnnounce(itemLink, _lootSlot, itemId, topPrioEntry)
+function LootMaster:DoNormalAnnounce(itemLink, _lootSlot, itemId, topEntry, prioEntry)
     -- Main announce
     local msg = format("{rt4} ROLL: %s {rt4}  |  /roll 1-100 = MS  |  /roll 1-99 = OS  |  %ds",
         itemLink, self.ROLL_DURATION)
     self:SafeSendChat(msg, "RAID_WARNING")
 
-    -- If someone has TMB priority (but no tie), announce them as an info note
-    if topPrioEntry then
-        local infoMsg = format("[TMB] Prioridade: %s (%s #%d) — roll aberto para todos",
-            topPrioEntry.name, topPrioEntry.tmbType, topPrioEntry.order)
+    -- Post priority info note
+    if prioEntry then
+        local infoMsg = format("[Prio Oficial] Prioridade: %s (prio #1) — roll aberto para todos",
+            prioEntry.name)
+        self:SafeSendChat(infoMsg, "RAID")
+    elseif topEntry then
+        local infoMsg = format("[Wishlist] Prioridade: %s (#%d) — roll aberto para todos",
+            topEntry.name, topEntry.order)
         self:SafeSendChat(infoMsg, "RAID")
     end
 
@@ -449,14 +492,19 @@ function LootMaster:DoNormalAnnounce(itemLink, _lootSlot, itemId, topPrioEntry)
 end
 
 ----------------------------------------------------------------------
--- Auto-Council: single clear TMB winner - award directly
+-- Auto-Council: single clear wishlist winner - award directly
 ----------------------------------------------------------------------
 function LootMaster:AutoCouncilAward(winner, itemLink, lootSlot, allCandidates)
-    local tmbStr = string.format("%s #%d", winner.tmbType, winner.order)
+    local orderStr
+    if winner.isPrio then
+        orderStr = "Prio Oficial #1"
+    else
+        orderStr = string.format("wishlist #%d", winner.order)
+    end
 
     -- Announce in raid
     self:SafeSendChat(
-        string.format("{rt4} TMB Council: %s >> %s [%s] {rt4}", itemLink, winner.name, tmbStr),
+        string.format("{rt4} Wishlist Council: %s >> %s [%s] {rt4}", itemLink, winner.name, orderStr),
         "RAID_WARNING"
     )
 
@@ -476,17 +524,17 @@ function LootMaster:StartRestrictedRoll(tied, _allCandidates, itemLink, _lootSlo
         self.restrictedRollers[strlower(c.name)] = true
         table.insert(names, c.name)
     end
-    local tmbStr  = string.format("%s #%d", tied[1].tmbType, tied[1].order)
+    local orderStr = string.format("wishlist #%d", tied[1].order)
     local nameStr = table.concat(names, ", ")
 
     -- Announce in RAID_WARNING — only listed players should roll
     self:SafeSendChat(
         string.format("{rt4} ROLL: %s {rt4}  |  Prioridade empatada [%s]: %s  |  /roll 1-100 MS  |  /roll 1-99 OS  |  %ds",
-            itemLink, tmbStr, nameStr, self.ROLL_DURATION),
+            itemLink, orderStr, nameStr, self.ROLL_DURATION),
         "RAID_WARNING"
     )
 
-    -- Addon comm: show popup to BRutus users who have the item on TMB
+    -- Addon comm: show popup to BRutus users who have the item on their wishlist
     itemId = itemId or (self.activeLoot and self.activeLoot.itemId) or 0
     local payload = string.format("ANNOUNCE|%s|%d|%d|1", itemLink, self.ROLL_DURATION, itemId)
     self:SafeSendAddon("BRutusLM", payload, "RAID")
@@ -503,8 +551,8 @@ function LootMaster:StartRestrictedRoll(tied, _allCandidates, itemLink, _lootSlo
     -- Show roll tracker for ML
     self:ShowRollFrame()
 
-    BRutus:Print(string.format("|cffFFD700TMB tie|r [%s]: %s — apenas eles podem rolar (%ds)",
-        tmbStr, nameStr, self.ROLL_DURATION))
+    BRutus:Print(string.format("|cffFFD700Wishlist tie|r [wishlist #%d]: %s — apenas eles podem rolar (%ds)",
+        tied[1].order, nameStr, self.ROLL_DURATION))
 end
 
 ----------------------------------------------------------------------
@@ -547,7 +595,7 @@ function LootMaster:ShowCouncilResultFrame(winner, itemLink, lootSlot, allCandid
     title:SetFont("Fonts\\FRIZQT__.TTF", 13, "OUTLINE")
     title:SetPoint("TOP", 0, -8)
     title:SetTextColor(C.gold.r, C.gold.g, C.gold.b)
-    title:SetText("TMB Council")
+    title:SetText("Wishlist Council")
 
     -- Item
     local itemText = f:CreateFontString(nil, "OVERLAY")
@@ -561,10 +609,12 @@ function LootMaster:ShowCouncilResultFrame(winner, itemLink, lootSlot, allCandid
     local winText = f:CreateFontString(nil, "OVERLAY")
     winText:SetFont("Fonts\\FRIZQT__.TTF", 11, "OUTLINE")
     winText:SetPoint("TOP", 0, -44)
-    local tColor = winner.tmbType == "prio" and "|cffFF8000" or "|cff4CB8FF"
-    winText:SetText(string.format(">> |cff%02x%02x%02x%s|r - %s%s #%d|r",
+    local winLabel = winner.isPrio
+        and string.format("|cffFFD700Prio Oficial #1|r")
+        or  string.format("|cff4CB8FFwishlist #%d|r", winner.order)
+    winText:SetText(string.format(">> |cff%02x%02x%02x%s|r - %s",
         cc.r * 255, cc.g * 255, cc.b * 255,
-        winner.name, tColor, winner.tmbType, winner.order))
+        winner.name, winLabel))
 
     -- Separator
     local sep = f:CreateTexture(nil, "ARTWORK")
@@ -581,25 +631,21 @@ function LootMaster:ShowCouncilResultFrame(winner, itemLink, lootSlot, allCandid
             local ccc = CLASS_COLORS[c.class] or { r = 0.8, g = 0.8, b = 0.8 }
             local ctx = LootMaster:GetPlayerContext(c.name)
             local attColor = ctx.att25 >= 60 and "00FF00" or ctx.att25 >= 40 and "FFFF00" or "FF4444"
-            local recvColor = ctx.recvThisLockout >= 2 and "FF4444"
-                or ctx.recvThisLockout == 1 and "FFFF00" or "888888"
             local row = f:CreateFontString(nil, "OVERLAY")
             row:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
             row:SetPoint("TOPLEFT", 14, yOff)
-            local tc = c.tmbType == "prio" and "|cffFF8000" or "|cff4CB8FF"
             local prefix = (i == 1) and "|cff00ff00>>|r " or "   "
             row:SetText(string.format(
-                "%s|cff%02x%02x%02x%s|r  %s%s #%d|r  |cff%s%d%%|r  |cff%sR:%d|r",
+                "%s|cff%02x%02x%02x%s|r  |cff4CB8FFwishlist #%d|r  |cff%s%d%%|r",
                 prefix, ccc.r * 255, ccc.g * 255, ccc.b * 255,
-                c.name, tc, c.tmbType, c.order,
-                attColor, ctx.att25,
-                recvColor, ctx.recvThisLockout))
+                c.name, c.order,
+                attColor, ctx.att25))
             yOff = yOff - 18
         end
     end
 
     -- Buttons
-    local awardBtn = UI:CreateButton(f, "Award to " .. winner.name, 160, 26)
+    local awardBtn = UI:CreateButton(f, "Award to " .. winner.name, 150, 26)
     awardBtn:SetPoint("BOTTOMLEFT", 10, 10)
     awardBtn:SetBackdropColor(0.0, 0.4, 0.0, 0.6)
     awardBtn:SetScript("OnClick", function()
@@ -607,7 +653,33 @@ function LootMaster:ShowCouncilResultFrame(winner, itemLink, lootSlot, allCandid
         f:Hide()
     end)
 
-    local rollBtn = UI:CreateButton(f, "Open Roll Instead", 140, 26)
+    -- Send to disenchanter
+    local deCouncilBtn = UI:CreateButton(f, "Send to DE", 110, 26)
+    deCouncilBtn:SetPoint("BOTTOM", 0, 10)
+    deCouncilBtn:SetBackdropColor(0.22, 0.10, 0.38, 0.7)
+    deCouncilBtn:SetScript("OnClick", function()
+        local loot = LootMaster.activeLoot
+        if loot then
+            LootMaster:SendToDisenchanter(loot.link, loot.slot, loot.itemId)
+        else
+            local iId = tonumber((itemLink or ""):match("item:(%d+)")) or 0
+            LootMaster:SendToDisenchanter(itemLink, lootSlot, iId)
+        end
+        f:Hide()
+    end)
+    deCouncilBtn:SetScript("OnEnter", function(self)
+        local deName = LootMaster:GetDisenchanter()
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        if deName and deName ~= "" then
+            GameTooltip:SetText("Enviar para Disenchant\n|cff00ff00" .. deName .. "|r", 1, 1, 1)
+        else
+            GameTooltip:SetText("Enviar para Disenchant\n|cffFF4444Nenhum disenchanter definido|r", 1, 1, 1)
+        end
+        GameTooltip:Show()
+    end)
+    deCouncilBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    local rollBtn = UI:CreateButton(f, "Open Roll Instead", 130, 26)
     rollBtn:SetPoint("BOTTOMRIGHT", -10, 10)
     rollBtn:SetScript("OnClick", function()
         f:Hide()
@@ -642,18 +714,18 @@ function LootMaster:OnAddonMessage(prefix, msg, channel, _sender)
     if cmd == "ANNOUNCE" then
         -- Another ML announced an item - show roll popup if we're not ML
         if not self:IsMasterLooter() then
-            local link, duration, itemId, tmbOnly = rest:match("^(.+)|(%d+)|(%d+)|([01])$")
+            local link, duration, itemId, wishlistOnly = rest:match("^(.+)|(%d+)|(%d+)|([01])$")
             if not link then
-                -- Backwards compat: old format without tmbOnly flag
+                -- Backwards compat: old format without wishlistOnly flag
                 link, duration, itemId = rest:match("^(.+)|(%d+)|(%d+)$")
-                tmbOnly = "0"
+                wishlistOnly = "0"
             end
             duration = tonumber(duration) or 30
             itemId = tonumber(itemId) or 0
 
-            -- TMB-only filter: only show popup if player has item on their TMB list
-            if tmbOnly == "1" and itemId > 0 then
-                if not self:PlayerHasItemOnTMB(itemId) then
+            -- Wishlist-only filter: only show popup if player has item on their wishlist
+            if wishlistOnly == "1" and itemId > 0 then
+                if not self:PlayerHasItemOnWishlist(itemId) then
                     return
                 end
             end
@@ -690,14 +762,28 @@ function LootMaster:RegisterRoll(name, rollType, roll)
             name, ctx.att25, minAtt), "RAID")
     end
 
-    -- TMB lookup
-    local tmbInfo = nil
-    if BRutus.TMB and self.activeLoot.itemId then
-        local interest = BRutus.TMB:GetItemInterest(self.activeLoot.itemId)
+    -- Wishlist lookup
+    local wishInfo = nil
+    if BRutus.Wishlist and self.activeLoot.itemId then
+        local interest = BRutus.Wishlist:GetItemInterest(self.activeLoot.itemId)
         if interest then
             for _, entry in ipairs(interest) do
                 if strlower(entry.name) == strlower(name) then
-                    tmbInfo = { type = entry.type, order = entry.order }
+                    wishInfo = { order = entry.order }
+                    break
+                end
+            end
+        end
+    end
+
+    -- Officer prio lookup
+    local prioOrder = nil
+    if BRutus.db and BRutus.db.lootPrios and self.activeLoot.itemId then
+        local prioList = BRutus.db.lootPrios[self.activeLoot.itemId]
+        if prioList then
+            for idx, entry in ipairs(prioList) do
+                if strlower(entry.name or "") == strlower(name) then
+                    prioOrder = idx
                     break
                 end
             end
@@ -728,19 +814,23 @@ function LootMaster:RegisterRoll(name, rollType, roll)
     end
 
     self.rolls[key] = {
-        name      = name,
-        class     = class,
-        rollType  = rollType,
-        roll      = roll,   -- actual /roll result (1-100 or 1-99)
-        tmb       = tmbInfo,
-        att25     = ctx.att25,
-        recvCount = ctx.recvThisLockout,
+        name       = name,
+        class      = class,
+        rollType   = rollType,
+        roll       = roll,
+        wishlist   = wishInfo,
+        prioOrder  = prioOrder,
+        att25      = ctx.att25,
+        recvCount  = ctx.recvThisLockout,
     }
 
-    -- Announce TMB tier to raid (the /roll number is already visible in system chat)
-    if tmbInfo then
-        self:SafeSendChat(string.format("[Loot] %s: %s [TMB: %s #%d]",
-            name, rollType, tmbInfo.type, tmbInfo.order), "RAID")
+    -- Announce prio or wishlist position to raid
+    if prioOrder then
+        self:SafeSendChat(string.format("[Loot] %s: %s [Prio Oficial #%d]",
+            name, rollType, prioOrder), "RAID")
+    elseif wishInfo then
+        self:SafeSendChat(string.format("[Loot] %s: %s [Wishlist #%d]",
+            name, rollType, wishInfo.order), "RAID")
     end
 
     -- Refresh ML roll frame
@@ -763,7 +853,7 @@ function LootMaster:EndRolling()
         self.rollTimer = nil
     end
 
-    -- Sort rolls: MS first (by TMB prio > roll), then OS (by roll)
+    -- Sort rolls: MS first (by wishlist order then roll), then OS (by roll)
     local sorted = {}
     for _, r in pairs(self.rolls) do
         if r.rollType ~= "PASS" then
@@ -776,21 +866,17 @@ function LootMaster:EndRolling()
         if a.rollType ~= b.rollType then
             return a.rollType == "MS"
         end
-        -- Within same type: TMB prio > wishlist > no TMB
-        local aPrio = (a.tmb and a.tmb.type == "prio") and 1 or (a.tmb and a.tmb.type == "wishlist") and 2 or 3
-        local bPrio = (b.tmb and b.tmb.type == "prio") and 1 or (b.tmb and b.tmb.type == "wishlist") and 2 or 3
+        -- Officer prio: lower index wins (no prio = 999)
+        local aPrio = a.prioOrder or 999
+        local bPrio = b.prioOrder or 999
         if aPrio ~= bPrio then return aPrio < bPrio end
-        -- Same TMB tier: lower order number wins
-        if a.tmb and b.tmb and a.tmb.order ~= b.tmb.order then
-            return a.tmb.order < b.tmb.order
-        end
+        -- Wishlist priority: lower order number wins; no wishlist entry ranks last
+        local aOrder = a.wishlist and a.wishlist.order or 999
+        local bOrder = b.wishlist and b.wishlist.order or 999
+        if aOrder ~= bOrder then return aOrder < bOrder end
         -- Attendance tiebreaker: higher 25-man attendance wins
         if BRutus.db.lootMaster.attTiebreaker and (a.att25 or 0) ~= (b.att25 or 0) then
             return (a.att25 or 0) > (b.att25 or 0)
-        end
-        -- Received penalty: fewer items received this lockout ranks higher
-        if BRutus.db.lootMaster.recvPenalty and (a.recvCount or 0) ~= (b.recvCount or 0) then
-            return (a.recvCount or 0) < (b.recvCount or 0)
         end
         -- Final tiebreaker: higher roll
         return a.roll > b.roll
@@ -802,12 +888,14 @@ function LootMaster:EndRolling()
     -- Announce winner in raid
     if #sorted > 0 then
         local winner = sorted[1]
-        local tmbStr = ""
-        if winner.tmb then
-            tmbStr = string.format(" [TMB: %s #%d]", winner.tmb.type, winner.tmb.order)
+        local wishStr = ""
+        if winner.prioOrder then
+            wishStr = string.format(" [Prio Oficial #%d]", winner.prioOrder)
+        elseif winner.wishlist then
+            wishStr = string.format(" [Wishlist #%d]", winner.wishlist.order)
         end
         self:SafeSendChat(string.format("{rt4} WINNER: %s (%s - %d)%s for %s",
-            winner.name, winner.rollType, winner.roll, tmbStr, self.activeLoot.link), "RAID_WARNING")
+            winner.name, winner.rollType, winner.roll, wishStr, self.activeLoot.link), "RAID_WARNING")
     else
         self:SafeSendChat("{rt4} No rolls received for " .. self.activeLoot.link, "RAID_WARNING")
     end
@@ -865,6 +953,9 @@ function LootMaster:AwardLoot(playerName)
     self:SafeSendChat(string.format("{rt4} %s awarded to %s", itemLink, playerName), "RAID")
 
     -- Save to award history
+    if not BRutus.db.lootMaster.awardHistory then
+        BRutus.db.lootMaster.awardHistory = {}
+    end
     table.insert(BRutus.db.lootMaster.awardHistory, 1, {
         link = itemLink,
         itemId = itemId,
@@ -883,13 +974,7 @@ function LootMaster:AwardLoot(playerName)
         BRutus:Print(itemLink .. " awarded to |cff00ff00" .. playerName .. "|r - trade to deliver.")
     end
 
-    -- Record in TMB local data for lockout-received tracking
-    if BRutus.TMB and itemId then
-        local _, _, _, _, _, _, _, instID = GetInstanceInfo()
-        local wNum = BRutus.RaidTracker
-            and BRutus.RaidTracker:GetWeekNum(GetServerTime()) or 0
-        BRutus.TMB:RecordReceived(playerName, itemId, itemLink, instID, wNum)
-    end
+    -- (Loot tracking is handled by LootTracker)
 
     self.activeLoot = nil
     self.rolls = {}
@@ -1076,29 +1161,44 @@ function LootMaster:ShowRollPopup(itemLink, duration, itemId)
     itemText:SetPoint("TOP", 0, -26)
     itemText:SetText(itemLink or "Unknown Item")
 
-    -- TMB info
+    -- Wishlist / prio info
     local tmbText = f:CreateFontString(nil, "OVERLAY")
     tmbText:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
     tmbText:SetPoint("TOP", 0, -42)
     tmbText:SetTextColor(C.silver.r, C.silver.g, C.silver.b)
 
-    if itemId and itemId > 0 and BRutus.TMB then
+    if itemId and itemId > 0 and BRutus.Wishlist then
         local myName = UnitName("player")
-        local interest = BRutus.TMB:GetItemInterest(itemId)
-        local myEntry = nil
-        if interest then
-            for _, e in ipairs(interest) do
-                if strlower(e.name) == strlower(myName) then
-                    myEntry = e
+
+        -- Check officer prio first
+        local prioOrder = nil
+        if BRutus.db and BRutus.db.lootPrios and BRutus.db.lootPrios[itemId] then
+            for idx, entry in ipairs(BRutus.db.lootPrios[itemId]) do
+                if strlower(entry.name or "") == strlower(myName or "") then
+                    prioOrder = idx
                     break
                 end
             end
         end
-        if myEntry then
-            local color = myEntry.type == "prio" and "|cffFF8000" or "|cff4CB8FF"
-            tmbText:SetText("TMB: " .. color .. myEntry.type .. " #" .. myEntry.order .. "|r")
+
+        if prioOrder then
+            tmbText:SetText(string.format("|cffFFD700[PRIO OFICIAL #%d]|r", prioOrder))
         else
-            tmbText:SetText("|cff666666Not on your TMB list|r")
+            local interest = BRutus.Wishlist:GetItemInterest(itemId)
+            local myEntry = nil
+            if interest then
+                for _, e in ipairs(interest) do
+                    if strlower(e.name) == strlower(myName) then
+                        myEntry = e
+                        break
+                    end
+                end
+            end
+            if myEntry then
+                tmbText:SetText("|cff4CB8FFWishlist #" .. myEntry.order .. "|r")
+            else
+                tmbText:SetText("|cff666666Not on your wishlist|r")
+            end
         end
     else
         tmbText:SetText("")
@@ -1175,7 +1275,7 @@ function LootMaster:SetActiveLoot(link, slot, itemId)
 end
 
 ----------------------------------------------------------------------
--- UI: Loot frame for ML — auto-opens on boss kill, shows TMB priority
+-- UI: Loot frame for ML — auto-opens on boss kill, shows wishlist priority
 -- per item; officer can award directly or open a roll for tied players.
 ----------------------------------------------------------------------
 function LootMaster:ShowLootFrame(items)
@@ -1315,6 +1415,35 @@ function LootMaster:ShowLootFrame(items)
     local openRollBtn = UI:CreateButton(f, "Open Roll", 120, 26)
     openRollBtn:SetPoint("RIGHT", awardTopBtn, "LEFT", -6, 0)
 
+    -- Send to disenchanter (for items nobody wants)
+    local deLootBtn = UI:CreateButton(f, "Send to DE", 110, 26)
+    deLootBtn:SetPoint("RIGHT", openRollBtn, "LEFT", -6, 0)
+    deLootBtn:SetBackdropColor(0.22, 0.10, 0.38, 0.7)
+    deLootBtn:SetScript("OnClick", function()
+        if not selectedItem then
+            statusText:SetText("|cffFF4444Selecione um item primeiro.|r")
+            return
+        end
+        local iId = tonumber(selectedItem.link:match("item:(%d+)"))
+        LootMaster:SetActiveLoot(selectedItem.link, selectedItem.slot, iId)
+        LootMaster:SendToDisenchanter(selectedItem.link, selectedItem.slot, iId)
+        statusText:SetText("|cff9966FFEnviado para Disenchant!|r")
+        if itemBtns[selectedItem.slot] then
+            itemBtns[selectedItem.slot].awardedText:Show()
+        end
+    end)
+    deLootBtn:SetScript("OnEnter", function(self)
+        local deName = LootMaster:GetDisenchanter()
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        if deName and deName ~= "" then
+            GameTooltip:SetText("Enviar para Disenchant\n|cff00ff00" .. deName .. "|r", 1, 1, 1)
+        else
+            GameTooltip:SetText("Enviar para Disenchant\n|cffFF4444Nenhum disenchanter definido|r", 1, 1, 1)
+        end
+        GameTooltip:Show()
+    end)
+    deLootBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
     local topCandidate = nil
     local tiedCount    = 0
 
@@ -1339,7 +1468,7 @@ function LootMaster:ShowLootFrame(items)
     end
 
     ----------------------------------------------------------------
-    -- Helper: do the award + TMB record + UI update
+    -- Helper: do the award + UI update
     ----------------------------------------------------------------
     local function DoAward(item, entryName)
         local iId = tonumber(item.link:match("item:(%d+)"))
@@ -1385,19 +1514,17 @@ function LootMaster:ShowLootFrame(items)
             return
         end
 
-        -- Full TMB interest list (unfiltered; we apply raid filter ourselves)
-        local interest = BRutus.TMB and BRutus.TMB:GetItemInterest(itemId) or nil
+        -- Full wishlist interest list
+        local interest = BRutus.Wishlist and BRutus.Wishlist:GetItemInterest(itemId) or nil
         local candidates = {}
         if interest then
             for _, e in ipairs(interest) do
-                if e.type ~= "received" then
-                    table.insert(candidates, e)
-                end
+                table.insert(candidates, e)
             end
         end
 
         if #candidates == 0 then
-            NoData("No TMB data for this item — use Open Roll.")
+            NoData("Nenhum dado de wishlist para este item — use Open Roll.")
             return
         end
 
@@ -1687,21 +1814,21 @@ function LootMaster:ShowLootFrame(items)
         leftYOff = leftYOff + 34
     end
 
-    -- TMB Council toggle (bottom-left)
+    -- Wishlist Council toggle (bottom-left)
     local tmbCheck = CreateFrame("CheckButton", nil, f, "UICheckButtonTemplate")
     tmbCheck:SetSize(22, 22)
     tmbCheck:SetPoint("BOTTOMLEFT", 5, 14)
-    tmbCheck:SetChecked(self.TMB_ONLY_MODE)
+    tmbCheck:SetChecked(self.WISHLIST_ONLY_MODE)
     tmbCheck:SetScript("OnClick", function(cb)
         local val = cb:GetChecked()
-        LootMaster.TMB_ONLY_MODE = val
-        BRutus.db.lootMaster.tmbOnlyMode = val
+        LootMaster.WISHLIST_ONLY_MODE = val
+        BRutus.db.lootMaster.wishlistOnlyMode = val
     end)
     local tmbLabel = f:CreateFontString(nil, "OVERLAY")
     tmbLabel:SetFont("Fonts\\FRIZQT__.TTF", 9, "OUTLINE")
     tmbLabel:SetPoint("LEFT", tmbCheck, "RIGHT", 2, 0)
     tmbLabel:SetTextColor(C.silver.r, C.silver.g, C.silver.b)
-    tmbLabel:SetText("TMB Council")
+    tmbLabel:SetText("Wishlist Council")
 
     ----------------------------------------------------------------
     -- Bottom button handlers
@@ -1800,7 +1927,7 @@ function LootMaster:ShowRollFrame()
     sep:SetVertexColor(C.border.r, C.border.g, C.border.b, 0.4)
 
     -- Column headers
-    local headers = { { "Player", 6 }, { "Type", 145 }, { "Roll", 195 }, { "TMB", 245 }, { "ATT%", 325 }, { "RECV", 375 } }
+    local headers = { { "Player", 6 }, { "Type", 145 }, { "Roll", 195 }, { "Prio/WL", 245 }, { "ATT%", 325 }, { "RECV", 375 } }
     for _, h in ipairs(headers) do
         local ht = f:CreateFontString(nil, "OVERLAY")
         ht:SetFont("Fonts\\FRIZQT__.TTF", 9, "OUTLINE")
@@ -1833,6 +1960,31 @@ function LootMaster:ShowRollFrame()
         LootMaster:EndRolling()
     end)
     f.endBtn = endBtn
+
+    -- Send to Disenchanter (between Cancel and End Rolling)
+    local deRollBtn = UI:CreateButton(f, "Send to DE", 100, 24)
+    deRollBtn:SetPoint("LEFT", cancelBtn, "RIGHT", 8, 0)
+    deRollBtn:SetBackdropColor(0.22, 0.10, 0.38, 0.7)
+    deRollBtn:SetScript("OnClick", function()
+        if not LootMaster.activeLoot then
+            BRutus:Print("Nenhum item ativo para enviar ao disenchanter.")
+            return
+        end
+        local loot = LootMaster.activeLoot
+        LootMaster:SendToDisenchanter(loot.link, loot.slot, loot.itemId)
+        f:Hide()
+    end)
+    deRollBtn:SetScript("OnEnter", function(self)
+        local deName = LootMaster:GetDisenchanter()
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        if deName and deName ~= "" then
+            GameTooltip:SetText("Enviar para Disenchant\n|cff00ff00" .. deName .. "|r", 1, 1, 1)
+        else
+            GameTooltip:SetText("Enviar para Disenchant\n|cffFF4444Nenhum disenchanter definido|r", 1, 1, 1)
+        end
+        GameTooltip:Show()
+    end)
+    deRollBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     -- Roll buttons for the initiator (ML can also compete for the item)
     -- OS button (right-most)
@@ -1915,13 +2067,16 @@ function LootMaster:RefreshRollFrame()
     for _, r in pairs(self.rolls) do
         table.insert(sorted, r)
     end
-    -- Sort: MS first, then by TMB prio, then roll
+    -- Sort: MS first, then prio order, then roll
     table.sort(sorted, function(a, b)
         if a.rollType ~= b.rollType then
             if a.rollType == "PASS" then return false end
             if b.rollType == "PASS" then return true end
             return a.rollType == "MS"
         end
+        local aPrio = a.prioOrder or 999
+        local bPrio = b.prioOrder or 999
+        if aPrio ~= bPrio then return aPrio < bPrio end
         return a.roll > b.roll
     end)
 
@@ -1962,13 +2117,14 @@ function LootMaster:RefreshRollFrame()
         rollText:SetTextColor(1, 1, 1)
         rollText:SetText(r.rollType ~= "PASS" and tostring(r.roll) or "-")
 
-        -- TMB info
+        -- Prio / Wishlist info
         local tmbText = row:CreateFontString(nil, "OVERLAY")
         tmbText:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
         tmbText:SetPoint("LEFT", 250, 0)
-        if r.tmb then
-            local tc = r.tmb.type == "prio" and "|cffFF8000" or "|cff4CB8FF"
-            tmbText:SetText(tc .. r.tmb.type .. " #" .. r.tmb.order .. "|r")
+        if r.prioOrder then
+            tmbText:SetText(string.format("|cffFFD700* Prio #%d|r", r.prioOrder))
+        elseif r.wishlist then
+            tmbText:SetText("|cff4CB8FFwishlist #" .. r.wishlist.order .. "|r")
         else
             tmbText:SetTextColor(0.4, 0.4, 0.4)
             tmbText:SetText("-")
@@ -2065,4 +2221,37 @@ function LootMaster:CountRolls()
     local n = 0
     for _ in pairs(self.rolls) do n = n + 1 end
     return n
+end
+
+----------------------------------------------------------------------
+-- Disenchanter: designated player who receives unwanted items to DE
+----------------------------------------------------------------------
+function LootMaster:GetDisenchanter()
+    return self.disenchanter or ""
+end
+
+function LootMaster:SetDisenchanter(name)
+    self.disenchanter = name or ""
+end
+
+-- Award the active item (or the provided item) to the disenchanter.
+-- Called when ML clicks "Send to DE" from any loot UI.
+function LootMaster:SendToDisenchanter(itemLink, lootSlot, itemId)
+    local deName = self:GetDisenchanter()
+    if not deName or deName == "" then
+        BRutus:Print("|cffFF4444Nenhum disenchanter definido.|r Configure nas opções do Loot Master.")
+        return
+    end
+
+    -- Ensure activeLoot is populated so AwardLoot can use it
+    if not self.activeLoot then
+        self:SetActiveLoot(itemLink or "", lootSlot, itemId or 0)
+    end
+
+    self:SafeSendChat(
+        string.format("{rt7} %s — ninguém quis. Enviando para Disenchant: |cff00ff00%s|r",
+            itemLink or "item", deName),
+        "RAID")
+
+    self:AwardLoot(deName)
 end

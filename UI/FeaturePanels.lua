@@ -24,8 +24,8 @@ function BRutus:CreateRaidsPanel(parent, _mainFrame)
     local statusText = UI:CreateText(scrollParent, "", 10, C.silver.r, C.silver.g, C.silver.b)
     statusText:SetPoint("TOPLEFT", 200, -4)
 
-    -- Export to TMB button (25-man data)
-    local exportBtn = UI:CreateButton(scrollParent, "Export for TMB", 140, 22)
+    -- Export attendance button (25-man data)
+    local exportBtn = UI:CreateButton(scrollParent, "Export Attendance", 140, 22)
     exportBtn:SetPoint("TOPRIGHT", 0, 0)
     exportBtn:SetScript("OnClick", function()
         if not BRutus.RaidTracker then return end
@@ -34,7 +34,7 @@ function BRutus:CreateRaidsPanel(parent, _mainFrame)
             BRutus:Print("|cffFF4444Export failed:|r " .. (err or "unknown error"))
             return
         end
-        BRutus:ShowExportPopup("TMB Attendance Export (25-man)", json)
+        BRutus:ShowExportPopup("Export de Presença (25-man)", json)
     end)
 
     ----------------------------------------------------------------
@@ -110,9 +110,11 @@ function BRutus:RefreshRaidsPanel(sessionContent, attContent, statusText)
 
     local totalAll  = BRutus.RaidTracker:GetTotalSessions()
     local total25   = BRutus.RaidTracker:GetTotal25ManSessions()
+    local curGroup  = BRutus.RaidTracker:GetCurrentGroup()
+    local groupStr  = curGroup ~= "" and ("|cffFFD700" .. curGroup .. "|r  ·  ") or ""
     local trackStr  = BRutus.RaidTracker.trackingActive
                       and "|cff00ff00Tracking|r" or "|cff888888Idle|r"
-    statusText:SetText(totalAll .. " lockouts (" .. total25 .. " 25-man)  |  " .. trackStr)
+    statusText:SetText(groupStr .. totalAll .. " lockouts (" .. total25 .. " 25-man)  |  " .. trackStr)
 
     ----------------------------------------------------------------
     -- Sessions grouped by instance + TBC reset week (Tuesday reset)
@@ -131,7 +133,8 @@ function BRutus:RefreshRaidsPanel(sessionContent, attContent, statusText)
         local sd        = s.data
         local startTime = sd.startTime or s.id
         local weekNum   = math.floor((startTime - TUESDAY_EPOCH) / WEEK_SECS)
-        local groupKey  = (sd.instanceID or 0) .. "_" .. weekNum
+        local sgTag     = sd.groupTag or ""
+        local groupKey  = (sd.instanceID or 0) .. "_" .. weekNum .. "|" .. sgTag
 
         if not groups[groupKey] then
             local wStart = TUESDAY_EPOCH + weekNum * WEEK_SECS
@@ -139,6 +142,7 @@ function BRutus:RefreshRaidsPanel(sessionContent, attContent, statusText)
                 key        = groupKey,
                 instanceID = sd.instanceID,
                 name       = sd.name or "Unknown",
+                groupTag   = sgTag,
                 weekNum    = weekNum,
                 weekStart  = wStart,
                 sessions   = {},
@@ -191,7 +195,11 @@ function BRutus:RefreshRaidsPanel(sessionContent, attContent, statusText)
 
         -- Raid name (gold for 25-man, silver for 10-man)
         local nameClr = is25 and C.gold or C.silver
-        UI:CreateText(gRow, g.name, 11, nameClr.r, nameClr.g, nameClr.b)
+        local nameLabel = g.name
+        if g.groupTag and g.groupTag ~= "" then
+            nameLabel = "|cff9966FF[" .. g.groupTag .. "]|r " .. nameLabel
+        end
+        UI:CreateText(gRow, nameLabel, 11, nameClr.r, nameClr.g, nameClr.b)
             :SetPoint("LEFT", 18, 0)
 
         -- Week range label  e.g.  "22/04 – 28/04"
@@ -400,17 +408,24 @@ function BRutus:RefreshRaidsPanel(sessionContent, attContent, statusText)
 
     ----------------------------------------------------------------
     -- Attendance list — always 25-man stats regardless of filter
+    -- Nested structure: attendance[groupTag][playerKey]
     ----------------------------------------------------------------
     local attData = BRutus.db.raidTracker and BRutus.db.raidTracker.attendance or {}
     local attList = {}
-    for key, att in pairs(attData) do
-        if (att.raids25 or 0) > 0 then
-            table.insert(attList, { key = key, data = att })
+    for groupTag, groupAtt in pairs(attData) do
+        if type(groupAtt) == "table" then
+            for key, att in pairs(groupAtt) do
+                if (att.raids25 or 0) > 0 then
+                    table.insert(attList, { key = key, data = att, groupTag = groupTag })
+                end
+            end
         end
     end
     table.sort(attList, function(a, b)
-        local pa = BRutus.RaidTracker:GetAttendance25ManPercent(a.key)
-        local pb = BRutus.RaidTracker:GetAttendance25ManPercent(b.key)
+        -- Sort by group first, then by attendance % descending
+        if a.groupTag ~= b.groupTag then return a.groupTag < b.groupTag end
+        local pa = BRutus.RaidTracker:GetAttendance25ManPercent(a.key, a.groupTag)
+        local pb = BRutus.RaidTracker:GetAttendance25ManPercent(b.key, b.groupTag)
         if pa == pb then
             return (a.data.raids25 or 0) > (b.data.raids25 or 0)
         end
@@ -427,10 +442,28 @@ function BRutus:RefreshRaidsPanel(sessionContent, attContent, statusText)
         local t = UI:CreateText(attHdr, txt, 8, C.accent.r, C.accent.g, C.accent.b)
         t:SetPoint("LEFT", x, 0)
     end
-    AHdr("PLAYER", 6); AHdr("ATT%", 160); AHdr("RAIDS", 220); AHdr("AVG SCORE", 280); AHdr("LAST RAID", 380)
+    AHdr("PLAYER", 6); AHdr("GROUP", 145); AHdr("ATT%", 240); AHdr("RAIDS", 295); AHdr("AVG SCORE", 355); AHdr("LAST RAID", 450)
 
     yOff = 20
+    local lastGroupTag = nil
     for idx, entry in ipairs(attList) do
+        -- Group separator header when the group changes
+        if entry.groupTag ~= lastGroupTag then
+            lastGroupTag = entry.groupTag
+            local ghRow = CreateFrame("Frame", nil, attContent, "BackdropTemplate")
+            ghRow:SetSize(attContent:GetWidth() - 10, 16)
+            ghRow:SetPoint("TOPLEFT", 0, -yOff)
+            ghRow:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
+            ghRow:SetBackdropColor(0.10, 0.08, 0.18, 1)
+            local groupLabel = entry.groupTag ~= "" and entry.groupTag or "(sem grupo)"
+            local total25g = BRutus.RaidTracker:GetTotal25ManSessions(entry.groupTag)
+            local ghText = UI:CreateText(ghRow,
+                "|cff9966FF" .. groupLabel .. "|r  —  " .. total25g .. " raids de 25",
+                9, C.white.r, C.white.g, C.white.b)
+            ghText:SetPoint("LEFT", 6, 0)
+            yOff = yOff + 18
+        end
+
         local row = CreateFrame("Frame", nil, attContent, "BackdropTemplate")
         row:SetSize(attContent:GetWidth() - 10, 20)
         row:SetPoint("TOPLEFT", 0, -yOff)
@@ -445,16 +478,20 @@ function BRutus:RefreshRaidsPanel(sessionContent, attContent, statusText)
         local nameText = UI:CreateText(row, shortName, 10, cr, cg, cb)
         nameText:SetPoint("LEFT", 6, 0)
 
-        local pct      = BRutus.RaidTracker:GetAttendance25ManPercent(entry.key)
+        -- Group tag column
+        local gtLabel = entry.groupTag ~= "" and entry.groupTag or "-"
+        UI:CreateText(row, gtLabel, 9, 0.6, 0.4, 1.0):SetPoint("LEFT", 145, 0)
+
+        local total25g = BRutus.RaidTracker:GetTotal25ManSessions(entry.groupTag)
+        local pct      = BRutus.RaidTracker:GetAttendance25ManPercent(entry.key, entry.groupTag)
         local pctClr   = pct >= 75 and C.green or (pct >= 50 and C.gold or C.red)
         local pctText  = UI:CreateText(row, pct .. "%", 10, pctClr.r, pctClr.g, pctClr.b)
-        pctText:SetPoint("LEFT", 160, 0)
+        pctText:SetPoint("LEFT", 240, 0)
 
         local raids25  = entry.data.raids25 or 0
-        local fracText = UI:CreateText(row, raids25 .. "/" .. total25, 10, C.silver.r, C.silver.g, C.silver.b)
-        fracText:SetPoint("LEFT", 220, 0)
+        local fracText = UI:CreateText(row, raids25 .. "/" .. total25g, 10, C.silver.r, C.silver.g, C.silver.b)
+        fracText:SetPoint("LEFT", 295, 0)
 
-        -- Average score per attended raid
         local avgScore = 0
         if raids25 > 0 and entry.data.totalScore25 then
             avgScore = math.floor(entry.data.totalScore25 / raids25 + 0.5)
@@ -463,15 +500,13 @@ function BRutus:RefreshRaidsPanel(sessionContent, attContent, statusText)
         if avgScore < 80 then asr, asg, asb = C.gold.r, C.gold.g, C.gold.b end
         if avgScore < 60 then asr, asg, asb = C.red.r,  C.red.g,  C.red.b  end
         local avgScoreText = UI:CreateText(row, avgScore .. " pts", 9, asr, asg, asb)
-        avgScoreText:SetPoint("LEFT", 280, 0)
+        avgScoreText:SetPoint("LEFT", 355, 0)
 
-        -- Last raid date
         local lastStr = entry.data.lastRaid and entry.data.lastRaid > 0
             and date("%m/%d/%Y", entry.data.lastRaid) or "-"
         local lastText = UI:CreateText(row, lastStr, 9, C.silver.r, C.silver.g, C.silver.b)
-        lastText:SetPoint("LEFT", 380, 0)
+        lastText:SetPoint("LEFT", 450, 0)
 
-        -- Hover: tooltip with penalty breakdown
         local capturedEntry = entry
         row:EnableMouse(true)
         row:SetScript("OnEnter", function(self)
@@ -479,19 +514,20 @@ function BRutus:RefreshRaidsPanel(sessionContent, attContent, statusText)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             GameTooltip:ClearLines()
             GameTooltip:AddLine(shortName, cr, cg, cb)
+            local gLabel = capturedEntry.groupTag ~= "" and capturedEntry.groupTag or "(sem grupo)"
+            GameTooltip:AddLine("Grupo: " .. gLabel, 0.6, 0.4, 1.0)
             GameTooltip:AddLine("25-man Attendance", C.gold.r, C.gold.g, C.gold.b)
             GameTooltip:AddLine(" ")
-            GameTooltip:AddDoubleLine("Raids attended:", raids25 .. "/" .. total25, 1,1,1, C.silver.r,C.silver.g,C.silver.b)
+            GameTooltip:AddDoubleLine("Raids:", raids25 .. "/" .. total25g, 1,1,1, C.silver.r,C.silver.g,C.silver.b)
             GameTooltip:AddDoubleLine("Attendance %:", pct .. "%", 1,1,1, pctClr.r,pctClr.g,pctClr.b)
             if avgScore > 0 then
                 GameTooltip:AddDoubleLine("Avg score/raid:", avgScore .. " pts", 1,1,1, asr,asg,asb)
             end
             GameTooltip:AddLine(" ")
-            GameTooltip:AddLine("Score starts at 100 per raid.", 0.6,0.6,0.6)
-            GameTooltip:AddLine("-" .. (BRutus.RaidTracker.PENALTIES.LATE or 10) .. " Late arrival", 0.7,0.5,0.5)
-            GameTooltip:AddLine("-" .. (BRutus.RaidTracker.PENALTIES.LEFT_EARLY or 10) .. " Left early", 0.7,0.5,0.5)
-            GameTooltip:AddLine("-" .. (BRutus.RaidTracker.PENALTIES.NO_CONSUMES or 10) .. " No consumables", 0.7,0.5,0.5)
-            GameTooltip:AddLine("Absent sessions count as 0.", 0.6,0.6,0.6)
+            GameTooltip:AddLine("Score começa em 100 por raid.", 0.6,0.6,0.6)
+            GameTooltip:AddLine("-" .. (BRutus.RaidTracker.PENALTIES.LATE or 10) .. " Chegou tarde", 0.7,0.5,0.5)
+            GameTooltip:AddLine("-" .. (BRutus.RaidTracker.PENALTIES.LEFT_EARLY or 10) .. " Saiu cedo", 0.7,0.5,0.5)
+            GameTooltip:AddLine("-" .. (BRutus.RaidTracker.PENALTIES.NO_CONSUMES or 10) .. " Sem consumíveis", 0.7,0.5,0.5)
             GameTooltip:Show()
             local _ = capturedEntry
         end)
@@ -577,15 +613,14 @@ function BRutus:RefreshLootPanel(content, countText)
         local altIdx = (math.floor(yOff / 22) % 2 == 0) and C.row1 or C.row2
         row:SetBackdropColor(altIdx.r, altIdx.g, altIdx.b, altIdx.a)
 
-        -- Item name with quality color (resolved from itemLink for locale)
+        -- Item name with quality color (always resolve via GetItemInfo for correct locale).
+        -- GetItemInfo accepts itemLink directly, so no need to parse the ID.
         local qColor = BRutus.QualityColors[entry.quality] or BRutus.QualityColors[1]
-        local displayName = entry.itemName or "?"
-        if entry.itemLink then
-            local localName = entry.itemLink:match("%[(.-)%]")
-            if localName and localName ~= "" then
-                displayName = localName
-            end
+        local localItemName, _, _, _, _, _, _, _, _, _, localItemQuality = GetItemInfo(entry.itemLink or entry.itemId or 0)
+        if localItemQuality then
+            qColor = BRutus.QualityColors[localItemQuality] or qColor
         end
+        local displayName = localItemName or entry.itemName or "?"
         local itemText = UI:CreateText(row, displayName, 10, qColor.r, qColor.g, qColor.b)
         itemText:SetPoint("LEFT", 6, 0)
         itemText:SetWidth(280)
@@ -1032,7 +1067,7 @@ function BRutus:RefreshSettingsPanel(content)
         BRutus.db.settings.modules = {
             raidTracker = true, lootTracker = true, lootMaster = true,
             consumableChecker = true, recruitment = true, trialTracker = true,
-            officerNotes = true, tmb = true, commSystem = true,
+            officerNotes = true, commSystem = true,
             raidHUD = true,
         }
     end
@@ -1042,10 +1077,10 @@ function BRutus:RefreshSettingsPanel(content)
     local modules = {
         { key = "raidTracker",       label = "Raid Tracker",         desc = "Track raid attendance, penalties, and sessions", officerOnly = true },
         { key = "lootTracker",       label = "Loot Tracker",         desc = "Record loot drops from boss kills" },
-        { key = "lootMaster",        label = "Loot Master",          desc = "Master Loot with TMB auto-council" },
+        { key = "lootMaster",        label = "Loot Master",          desc = "Master Loot com wishlist auto-council" },
         { key = "consumableChecker", label = "Consumable Checker",   desc = "Scan raid for missing flasks/food/elixirs" },
         { key = "raidHUD",           label = "Raid CD Tracker",      desc = "Floating tracker for raid cooldowns and consumable check" },
-        { key = "tmb",               label = "TMB Integration",      desc = "That's My BiS wishlist/prio import", officerOnly = true },
+
         { key = "trialTracker",      label = "Trial Tracker",        desc = "Track trial member progress (officer)", officerOnly = true },
         { key = "officerNotes",      label = "Officer Notes",        desc = "Private notes on guild members (officer)", officerOnly = true },
         { key = "recruitment",       label = "Recruitment",          desc = "Auto-post recruitment messages (officer)", officerOnly = true },
@@ -1137,13 +1172,13 @@ function BRutus:RefreshSettingsPanel(content)
     end
     yOff = yOff + 28
 
-    -- TMB auto-council
-    local tmbCouncil = UI:CreateCheckbox(content, "TMB Auto-Council (check TMB before rolling)", 18)
+    -- Wishlist auto-council
+    local tmbCouncil = UI:CreateCheckbox(content, "Wishlist Auto-Council (verificar wishlist antes de rolar)", 18)
     tmbCouncil:SetPoint("TOPLEFT", 8, -yOff)
-    tmbCouncil.checkbox:SetChecked(BRutus.db.lootMaster.tmbOnlyMode or false)
+    tmbCouncil.checkbox:SetChecked(BRutus.db.lootMaster.wishlistOnlyMode or false)
     tmbCouncil.checkbox.onChanged = function(_, checked)
-        BRutus.db.lootMaster.tmbOnlyMode = checked
-        if BRutus.LootMaster then BRutus.LootMaster.TMB_ONLY_MODE = checked end
+        BRutus.db.lootMaster.wishlistOnlyMode = checked
+        if BRutus.LootMaster then BRutus.LootMaster.WISHLIST_ONLY_MODE = checked end
     end
     yOff = yOff + 28
 
@@ -1208,6 +1243,38 @@ function BRutus:RefreshSettingsPanel(content)
     end
     yOff = yOff + 28
 
+    -- Disenchanter name
+    local deLabel = UI:CreateText(content, "Disenchanter:", 11, C.white.r, C.white.g, C.white.b)
+    deLabel:SetPoint("TOPLEFT", 8, -yOff)
+
+    local deBox = CreateFrame("EditBox", nil, content, "BackdropTemplate")
+    deBox:SetSize(160, 22)
+    deBox:SetPoint("LEFT", deLabel, "RIGHT", 10, 0)
+    deBox:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
+    deBox:SetBackdropColor(0.06, 0.05, 0.10, 0.9)
+    deBox:SetBackdropBorderColor(C.accent.r, C.accent.g, C.accent.b, 0.5)
+    deBox:SetFont("Fonts\\FRIZQT__.TTF", 11, "OUTLINE")
+    deBox:SetTextColor(0.6, 0.4, 1.0)
+    deBox:SetMaxLetters(64)
+    deBox:SetAutoFocus(false)
+    deBox:SetText((BRutus.LootMaster and BRutus.LootMaster:GetDisenchanter()) or "")
+    deBox:SetScript("OnEnterPressed", function(self)
+        local name = strtrim(self:GetText())
+        if BRutus.LootMaster then BRutus.LootMaster:SetDisenchanter(name) end
+        if name ~= "" then
+            BRutus:Print("Disenchanter definido: |cff00ff00" .. name .. "|r")
+        else
+            BRutus:Print("Disenchanter removido.")
+        end
+        self:ClearFocus()
+    end)
+    deBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+
+    local deHint = UI:CreateText(content, "Nome do player que recebe itens para DE", 9, C.silver.r, C.silver.g, C.silver.b)
+    deHint:SetPoint("LEFT", deBox, "RIGHT", 8, 0)
+    deHint:SetWidth(180)
+    yOff = yOff + 30
+
     yOff = yOff + 8
     local sep3 = UI:CreateSeparator(content)
     sep3:SetPoint("TOPLEFT", 0, -yOff)
@@ -1222,6 +1289,40 @@ function BRutus:RefreshSettingsPanel(content)
     local rtTitle = UI:CreateHeaderText(content, "RAID TRACKER", 12)
     rtTitle:SetPoint("TOPLEFT", 0, -yOff)
     yOff = yOff + 22
+
+    -- Officer-only: Raid Group Tag
+    if isOfficer then
+        local groupLabel = UI:CreateText(content, "Grupo de Raid:", 11, C.white.r, C.white.g, C.white.b)
+        groupLabel:SetPoint("TOPLEFT", 8, -yOff)
+
+        local groupBox = CreateFrame("EditBox", nil, content, "BackdropTemplate")
+        groupBox:SetSize(160, 22)
+        groupBox:SetPoint("LEFT", groupLabel, "RIGHT", 10, 0)
+        groupBox:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
+        groupBox:SetBackdropColor(0.06, 0.05, 0.10, 0.9)
+        groupBox:SetBackdropBorderColor(0.6, 0.4, 1.0, 0.5)
+        groupBox:SetFont("Fonts\\FRIZQT__.TTF", 11, "OUTLINE")
+        groupBox:SetTextColor(0.6, 0.4, 1.0)
+        groupBox:SetMaxLetters(64)
+        groupBox:SetAutoFocus(false)
+        groupBox:SetText(BRutus.db.raidTracker and BRutus.db.raidTracker.currentGroupTag or "")
+        groupBox:SetScript("OnEnterPressed", function(self)
+            local name = strtrim(self:GetText())
+            if BRutus.RaidTracker then BRutus.RaidTracker:SetGroupTag(name) end
+            if name ~= "" then
+                BRutus:Print("Grupo de raid definido: |cff9966FF" .. name .. "|r")
+            else
+                BRutus:Print("Grupo de raid removido.")
+            end
+            self:ClearFocus()
+        end)
+        groupBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+
+        local groupHint = UI:CreateText(content, "Ex: Core 1, Core 2", 9, C.silver.r, C.silver.g, C.silver.b)
+        groupHint:SetPoint("LEFT", groupBox, "RIGHT", 8, 0)
+        groupHint:SetWidth(180)
+        yOff = yOff + 30
+    end -- isOfficer (Raid group tag)
 
     local penaltyInfo = UI:CreateText(content, "Penalties per session (base score = 100):", 11, C.white.r, C.white.g, C.white.b)
     penaltyInfo:SetPoint("TOPLEFT", 8, -yOff)
@@ -1299,18 +1400,18 @@ function BRutus:RefreshSettingsPanel(content)
     testLMDesc:SetPoint("LEFT", testLM, "RIGHT", 10, 0)
     yOff = yOff + 32
 
-    -- Test: TMB Council Preview
-    local testCouncil = UI:CreateButton(content, "Test TMB Council", 200, 26)
+    -- Test: Wishlist Council Preview
+    local testCouncil = UI:CreateButton(content, "Test Wishlist Council", 200, 26)
     testCouncil:SetPoint("TOPLEFT", 8, -yOff)
     testCouncil:SetScript("OnClick", function()
         if BRutus.LootMaster then
             BRutus.LootMaster.testMode = true
             -- Show council frame with fake data
-            local fakeWinner = { name = UnitName("player"), class = select(2, UnitClass("player")), tmbType = "prio", order = 1 }
+            local fakeWinner = { name = UnitName("player"), class = select(2, UnitClass("player")), wishlistType = "wishlist", order = 1 }
             local fakeCandidates = {
                 fakeWinner,
-                { name = "TestPlayer", class = "WARRIOR", tmbType = "prio", order = 2 },
-                { name = "AnotherOne", class = "MAGE", tmbType = "wishlist", order = 1 },
+                { name = "TestPlayer", class = "WARRIOR", wishlistType = "wishlist", order = 2 },
+                { name = "AnotherOne", class = "MAGE", wishlistType = "wishlist", order = 3 },
             }
             BRutus.LootMaster.activeLoot = {
                 link = "|cffff8000|Hitem:32837::::::::70:::::|h[Warglaive of Azzinoth]|h|r",
@@ -1346,10 +1447,10 @@ function BRutus:RefreshSettingsPanel(content)
                 endTime = GetServerTime() + 30,
             }
             BRutus.LootMaster.rolls = {
-                ["TestWarrior-Realm"] = { name = "TestWarrior", class = "WARRIOR", rollType = "MS", roll = 87, tmb = { type = "prio", order = 1 } },
-                ["TestMage-Realm"] = { name = "TestMage", class = "MAGE", rollType = "MS", roll = 54, tmb = { type = "wishlist", order = 2 } },
-                ["TestPriest-Realm"] = { name = "TestPriest", class = "PRIEST", rollType = "OS", roll = 92, tmb = nil },
-                ["TestRogue-Realm"] = { name = "TestRogue", class = "ROGUE", rollType = "PASS", roll = 0, tmb = nil },
+                ["TestWarrior-Realm"] = { name = "TestWarrior", class = "WARRIOR", rollType = "MS", roll = 87, prioOrder = 1 },
+                ["TestMage-Realm"] = { name = "TestMage", class = "MAGE", rollType = "MS", roll = 54, wishlist = { order = 2 } },
+                ["TestPriest-Realm"] = { name = "TestPriest", class = "PRIEST", rollType = "OS", roll = 92 },
+                ["TestRogue-Realm"] = { name = "TestRogue", class = "ROGUE", rollType = "PASS", roll = 0 },
             }
             BRutus.LootMaster:ShowRollFrame()
             BRutus:Print("Test roll tracker shown with sample rolls.")
@@ -1382,13 +1483,13 @@ function BRutus:RefreshSettingsPanel(content)
     yOff = yOff + 32
 
     -- Test: Export Attendance
-    local testExport = UI:CreateButton(content, "Test TMB Export", 200, 26)
+    local testExport = UI:CreateButton(content, "Test Attendance Export", 200, 26)
     testExport:SetPoint("TOPLEFT", 8, -yOff)
     testExport:SetScript("OnClick", function()
         if BRutus.RaidTracker then
             local json, err = BRutus.RaidTracker:ExportForTMB()
             if json then
-                BRutus:ShowExportPopup("TMB Attendance Export", json)
+                BRutus:ShowExportPopup("Export de Presença", json)
             else
                 BRutus:Print("|cffFF4444Export failed:|r " .. (err or "No attendance data"))
             end
@@ -1396,7 +1497,7 @@ function BRutus:RefreshSettingsPanel(content)
             BRutus:Print("|cffFF4444Raid Tracker module is disabled.|r")
         end
     end)
-    local testExpDesc = UI:CreateText(content, "Opens the TMB attendance export window", 9, C.silver.r, C.silver.g, C.silver.b)
+    local testExpDesc = UI:CreateText(content, "Abre a janela de export de presença", 9, C.silver.r, C.silver.g, C.silver.b)
     testExpDesc:SetPoint("LEFT", testExport, "RIGHT", 10, 0)
     yOff = yOff + 32
 
@@ -1527,4 +1628,990 @@ function BRutus:RefreshSettingsPanel(content)
     yOff = yOff + 36
 
     content:SetHeight(math.max(1, yOff))
+end
+
+----------------------------------------------------------------------
+-- WISHLIST FRAME — standalone frame for each member's own wishlist
+-- Accessible via /brutus wish  or the "My Wishlist" button in roster.
+----------------------------------------------------------------------
+-- WISH_VISIBLE × WISH_ROW_HEIGHT must fit within the scroll area.
+-- Frame=520, title+header=66, bottom bar=50 → scroll area=404px → max rows=floor(404/28)=14
+local WISH_ROW_HEIGHT = 28
+local WISH_VISIBLE    = 14
+
+local function BuildWishlistFrame()
+    local f = CreateFrame("Frame", "BRutusWishlistFrame", UIParent, "BackdropTemplate")
+    f:SetSize(500, 520)
+    f:SetPoint("CENTER")
+    f:SetBackdrop({
+        bgFile   = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = 1,
+    })
+    f:SetBackdropColor(0.06, 0.05, 0.10, 0.98)
+    f:SetBackdropBorderColor(C.accent.r, C.accent.g, C.accent.b, 0.8)
+    f:SetFrameStrata("HIGH")
+    f:SetFrameLevel(50)
+    f:SetMovable(true)
+    f:EnableMouse(true)
+    f:RegisterForDrag("LeftButton")
+    f:SetScript("OnDragStart", function(self) self:StartMoving() end)
+    f:SetScript("OnDragStop",  function(self) self:StopMovingOrSizing() end)
+    f:Hide()
+
+    table.insert(UISpecialFrames, "BRutusWishlistFrame")
+
+    -- Title bar
+    local titleBg = f:CreateTexture(nil, "BACKGROUND", nil, 1)
+    titleBg:SetTexture("Interface\\Buttons\\WHITE8x8")
+    titleBg:SetPoint("TOPLEFT",  1, -1)
+    titleBg:SetPoint("TOPRIGHT", -1, -1)
+    titleBg:SetHeight(39)
+    titleBg:SetVertexColor(C.headerBg.r, C.headerBg.g, C.headerBg.b, 1.0)
+
+    local titleText = f:CreateFontString(nil, "OVERLAY")
+    titleText:SetFont("Fonts\\FRIZQT__.TTF", 14, "OUTLINE")
+    titleText:SetPoint("LEFT", 14, 0)
+    titleText:SetPoint("TOP", 0, -12)
+    titleText:SetTextColor(C.gold.r, C.gold.g, C.gold.b)
+    titleText:SetText("MINHA WISHLIST")
+    f.titleText = titleText
+
+    -- Counter (N/50)
+    local counterText = f:CreateFontString(nil, "OVERLAY")
+    counterText:SetFont("Fonts\\FRIZQT__.TTF", 11, "OUTLINE")
+    counterText:SetPoint("RIGHT", -42, 0)
+    counterText:SetPoint("TOP",    0, -14)
+    counterText:SetTextColor(C.silver.r, C.silver.g, C.silver.b)
+    counterText:SetText("0/50")
+    f.counterText = counterText
+
+    -- Accent line under title
+    local titleLine = UI:CreateAccentLine(f, 2)
+    titleLine:SetPoint("TOPLEFT",  0, -40)
+    titleLine:SetPoint("TOPRIGHT", 0, -40)
+
+    -- Close button
+    local closeBtn = UI:CreateCloseButton(f)
+    closeBtn:SetPoint("TOPRIGHT", -4, -8)
+    closeBtn:SetScript("OnClick", function() f:Hide() end)
+
+    -- Column headers background
+    local hdrBg = f:CreateTexture(nil, "BACKGROUND")
+    hdrBg:SetTexture("Interface\\Buttons\\WHITE8x8")
+    hdrBg:SetPoint("TOPLEFT",  1, -42)
+    hdrBg:SetPoint("TOPRIGHT", -1, -42)
+    hdrBg:SetHeight(22)
+    hdrBg:SetVertexColor(C.headerBg.r, C.headerBg.g, C.headerBg.b, 0.9)
+
+    local function Hdr(lbl, x, w, justify)
+        local t = f:CreateFontString(nil, "OVERLAY")
+        t:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
+        t:SetTextColor(C.gold.r, C.gold.g, C.gold.b)
+        t:SetPoint("TOPLEFT", x, -44)
+        t:SetWidth(w)
+        t:SetJustifyH(justify or "LEFT")
+        t:SetText(lbl)
+        return t
+    end
+    Hdr("#",      10,  24, "CENTER")
+    Hdr("ITEM",   38, 262, "LEFT")
+    Hdr("TIPO",  308,  50, "CENTER")
+    Hdr("ORDEM", 366,  60, "CENTER")
+
+    -- Thin separator between headers and rows
+    local hdrLine = UI:CreateAccentLine(f, 1)
+    hdrLine:SetPoint("TOPLEFT",  1, -64)
+    hdrLine:SetPoint("TOPRIGHT", -1, -64)
+
+    -- Scroll area: TOPLEFT at y=-65, BOTTOMRIGHT at y=+50 (50px bottom bar)
+    -- Available height: 520 - 65 - 50 = 405px; 14 rows × 28px = 392px ✓
+    local scrollContainer = CreateFrame("Frame", nil, f, "BackdropTemplate")
+    scrollContainer:SetPoint("TOPLEFT",     1, -65)
+    scrollContainer:SetPoint("BOTTOMRIGHT", -1, 50)
+    scrollContainer:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
+    scrollContainer:SetBackdropColor(0.04, 0.03, 0.08, 1.0)
+
+    local scrollFrame = CreateFrame("ScrollFrame", "BRutusWishlistScroll", scrollContainer, "FauxScrollFrameTemplate")
+    scrollFrame:SetPoint("TOPLEFT",     0, 0)
+    scrollFrame:SetPoint("BOTTOMRIGHT", -16, 0)
+    UI:SkinScrollBar(scrollFrame, "BRutusWishlistScroll")
+    f.scrollFrame = scrollFrame
+
+    -- Rows (parented to scrollContainer, clipped by it)
+    f.rows = {}
+    for i = 1, WISH_VISIBLE do
+        local row = CreateFrame("Button", "BRutusWishRow" .. i, scrollContainer, "BackdropTemplate")
+        row:SetHeight(WISH_ROW_HEIGHT)
+        row:SetPoint("TOPLEFT",  0, -((i - 1) * WISH_ROW_HEIGHT))
+        row:SetPoint("RIGHT",  scrollContainer, "RIGHT", -18, 0)
+        row:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
+
+        local bgColor = (i % 2 == 0) and C.row2 or C.row1
+        row:SetBackdropColor(bgColor.r, bgColor.g, bgColor.b, bgColor.a)
+        row.defaultBg = bgColor
+
+        row:SetScript("OnEnter", function(self)
+            self:SetBackdropColor(C.rowHover.r, C.rowHover.g, C.rowHover.b, C.rowHover.a)
+            if self.itemLink and self.itemLink ~= "" then
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:SetHyperlink(self.itemLink)
+                GameTooltip:Show()
+            end
+        end)
+        row:SetScript("OnLeave", function(self)
+            local bg = self.defaultBg
+            self:SetBackdropColor(bg.r, bg.g, bg.b, bg.a)
+            GameTooltip:Hide()
+        end)
+
+        -- Order number
+        local numText = row:CreateFontString(nil, "OVERLAY")
+        numText:SetFont("Fonts\\FRIZQT__.TTF", 11, "OUTLINE")
+        numText:SetPoint("LEFT", 10, 0)
+        numText:SetWidth(24)
+        numText:SetJustifyH("CENTER")
+        numText:SetTextColor(C.silver.r, C.silver.g, C.silver.b)
+        row.numText = numText
+
+        -- Item link text
+        local itemText = row:CreateFontString(nil, "OVERLAY")
+        itemText:SetFont("Fonts\\FRIZQT__.TTF", 12, "OUTLINE")
+        itemText:SetPoint("LEFT", 38, 0)
+        itemText:SetWidth(262)
+        itemText:SetJustifyH("LEFT")
+        itemText:SetWordWrap(false)
+        row.itemText = itemText
+
+        -- MS/OS badge
+        local typeText = row:CreateFontString(nil, "OVERLAY")
+        typeText:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
+        typeText:SetPoint("LEFT", 308, 0)
+        typeText:SetWidth(50)
+        typeText:SetJustifyH("CENTER")
+        row.typeText = typeText
+
+        -- ↑ button
+        local upBtn = CreateFrame("Button", nil, row)
+        upBtn:SetSize(18, 18)
+        upBtn:SetPoint("LEFT", 366, 0)
+        upBtn:SetNormalTexture("Interface\\BUTTONS\\Arrow-Up-Up")
+        upBtn:SetHighlightTexture("Interface\\BUTTONS\\Arrow-Up-Up")
+        upBtn:SetScript("OnClick", function()
+            if row.itemId and BRutus.Wishlist then
+                BRutus.Wishlist:ReorderWishlist(row.itemId, -1)
+            end
+        end)
+        upBtn:SetScript("OnLeave", function()
+            local bg = row.defaultBg
+            row:SetBackdropColor(bg.r, bg.g, bg.b, bg.a)
+        end)
+
+        -- ↓ button
+        local downBtn = CreateFrame("Button", nil, row)
+        downBtn:SetSize(18, 18)
+        downBtn:SetPoint("LEFT", 386, 0)
+        downBtn:SetNormalTexture("Interface\\BUTTONS\\Arrow-Down-Up")
+        downBtn:SetHighlightTexture("Interface\\BUTTONS\\Arrow-Down-Up")
+        downBtn:SetScript("OnClick", function()
+            if row.itemId and BRutus.Wishlist then
+                BRutus.Wishlist:ReorderWishlist(row.itemId, 1)
+            end
+        end)
+        downBtn:SetScript("OnLeave", function()
+            local bg = row.defaultBg
+            row:SetBackdropColor(bg.r, bg.g, bg.b, bg.a)
+        end)
+
+        -- × remove button
+        local removeBtn = CreateFrame("Button", nil, row)
+        removeBtn:SetSize(18, 18)
+        removeBtn:SetPoint("LEFT", 410, 0)
+        local removeTex = removeBtn:CreateFontString(nil, "OVERLAY")
+        removeTex:SetFont("Fonts\\FRIZQT__.TTF", 14, "OUTLINE")
+        removeTex:SetPoint("CENTER")
+        removeTex:SetTextColor(0.7, 0.2, 0.2)
+        removeTex:SetText("×")
+        removeBtn:SetScript("OnClick", function()
+            if row.itemId and BRutus.Wishlist then
+                BRutus.Wishlist:RemoveFromWishlist(row.itemId)
+            end
+        end)
+        removeBtn:SetScript("OnLeave", function()
+            local bg = row.defaultBg
+            row:SetBackdropColor(bg.r, bg.g, bg.b, bg.a)
+        end)
+        removeBtn:SetScript("OnEnter", function()
+            removeTex:SetTextColor(1, 0.3, 0.3)
+        end)
+
+        row:Hide()
+        f.rows[i] = row
+    end
+
+    scrollFrame:SetScript("OnVerticalScroll", function(self, offset)
+        FauxScrollFrame_OnVerticalScroll(self, offset, WISH_ROW_HEIGHT, function()
+            BRutus:RefreshWishlistFrame()
+        end)
+    end)
+
+    -- Bottom bar (50px): separator line + dark background
+    local bottomLine = UI:CreateAccentLine(f, 1)
+    bottomLine:SetPoint("BOTTOMLEFT",  0, 50)
+    bottomLine:SetPoint("BOTTOMRIGHT", 0, 50)
+
+    local bottomBg = f:CreateTexture(nil, "BACKGROUND")
+    bottomBg:SetTexture("Interface\\Buttons\\WHITE8x8")
+    bottomBg:SetPoint("BOTTOMLEFT",  1, 1)
+    bottomBg:SetPoint("BOTTOMRIGHT", -1, 1)
+    bottomBg:SetHeight(49)
+    bottomBg:SetVertexColor(C.headerBg.r, C.headerBg.g, C.headerBg.b, 1.0)
+
+    -- MS/OS toggle
+    -- Layout (500px frame): [10] [osToggle 100] [6] [addBox 174] [6] [addBtn 88] [8] [syncBtn 80] [8]
+    -- Total: 10+100+6+174+6+88+8+80+8 = 480, centred with margins ✓
+    local osToggle = UI:CreateButton(f, "Adicionar MS", 100, 28)
+    osToggle:SetPoint("BOTTOMLEFT", 10, 11)
+    osToggle.isOS = false
+    osToggle:SetScript("OnClick", function(self)
+        self.isOS = not self.isOS
+        if self.isOS then
+            self.label:SetText("Adicionar OS")
+            self:SetBackdropColor(0.20, 0.20, 0.08, 0.8)
+        else
+            self.label:SetText("Adicionar MS")
+            self:SetBackdropColor(C.accentDim.r, C.accentDim.g, C.accentDim.b, 0.6)
+        end
+    end)
+    f.osToggle = osToggle
+
+    -- Add item edit box
+    local addBox = CreateFrame("EditBox", "BRutusWishAddBox", f, "BackdropTemplate")
+    addBox:SetSize(174, 28)
+    addBox:SetPoint("BOTTOMLEFT", osToggle, "BOTTOMRIGHT", 6, 0)
+    addBox:SetBackdrop({
+        bgFile   = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = 1,
+    })
+    addBox:SetBackdropColor(0.05, 0.05, 0.08, 1.0)
+    addBox:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.5)
+    addBox:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
+    addBox:SetTextColor(C.white.r, C.white.g, C.white.b)
+    addBox:SetTextInsets(6, 6, 0, 0)
+    addBox:SetAutoFocus(false)
+    addBox:SetMaxLetters(200)
+
+    local addPlaceholder = addBox:CreateFontString(nil, "OVERLAY")
+    addPlaceholder:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
+    addPlaceholder:SetPoint("LEFT", 6, 0)
+    addPlaceholder:SetTextColor(0.4, 0.4, 0.4)
+    addPlaceholder:SetText("Buscar item ou cole link...")
+
+    -- Search dropdown — appears above the addBox
+    local DROP_ROWS  = 6
+    local DROP_ROW_H = 22
+
+    local dropdown = CreateFrame("Frame", nil, f, "BackdropTemplate")
+    dropdown:SetWidth(280)
+    dropdown:SetHeight(DROP_ROWS * DROP_ROW_H + 2)
+    dropdown:SetPoint("BOTTOMLEFT", addBox, "TOPLEFT", 0, 2)
+    dropdown:SetBackdrop({
+        bgFile   = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = 1,
+    })
+    dropdown:SetBackdropColor(0.05, 0.05, 0.10, 0.98)
+    dropdown:SetBackdropBorderColor(C.accent.r, C.accent.g, C.accent.b, 0.7)
+    dropdown:SetFrameLevel(f:GetFrameLevel() + 20)
+    dropdown:Hide()
+    f.dropdown = dropdown
+
+    dropdown.rows = {}
+    for i = 1, DROP_ROWS do
+        local dr = CreateFrame("Button", nil, dropdown)
+        dr:SetHeight(DROP_ROW_H)
+        dr:SetPoint("TOPLEFT",  1, -((i - 1) * DROP_ROW_H) - 1)
+        dr:SetPoint("TOPRIGHT", -1, -((i - 1) * DROP_ROW_H) - 1)
+        dr:SetHighlightTexture("Interface\\Buttons\\WHITE8x8")
+        dr:GetHighlightTexture():SetVertexColor(C.rowHover.r, C.rowHover.g, C.rowHover.b, 0.3)
+        local drText = dr:CreateFontString(nil, "OVERLAY")
+        drText:SetFont("Fonts\\FRIZQT__.TTF", 11, "OUTLINE")
+        drText:SetPoint("LEFT", 6, 0)
+        drText:SetPoint("RIGHT", -6, 0)
+        drText:SetJustifyH("LEFT")
+        drText:SetWordWrap(false)
+        dr.label = drText
+        dr:SetScript("OnClick", function()
+            f.selectedItemId   = dr.itemId
+            f.selectedItemLink = dr.itemLink
+            f.selectedItemName = dr.itemName
+            f.suppressSearch   = true
+            addBox:SetText(dr.itemName or "")
+            f.suppressSearch   = nil
+            addPlaceholder:Hide()
+            dropdown:Hide()
+        end)
+        dropdown.rows[i] = dr
+        dr:Hide()
+    end
+
+    local function UpdateDropdown(query)
+        query = strlower(strtrim(query or ""))
+        -- Skip search for empty input, pasted links, or raw IDs — handled directly in DoAdd
+        if query == "" or query:find("item:", 1, true) or tonumber(query) then
+            dropdown:Hide()
+            return
+        end
+        local results = {}
+        if BRutus.Wishlist and BRutus.Wishlist.itemIndex then
+            for itemId in pairs(BRutus.Wishlist.itemIndex) do
+                local name, link, quality = GetItemInfo(itemId)
+                if name and strlower(name):find(query, 1, true) then
+                    tinsert(results, { itemId = itemId, name = name, link = link, quality = quality or 1 })
+                end
+            end
+        end
+        table.sort(results, function(a, b) return a.name < b.name end)
+        if #results == 0 then
+            dropdown:Hide()
+            return
+        end
+        local shown = math.min(#results, DROP_ROWS)
+        dropdown:SetHeight(shown * DROP_ROW_H + 2)
+        for i = 1, DROP_ROWS do
+            local dr = dropdown.rows[i]
+            if i <= shown then
+                local entry = results[i]
+                local r, g, b = GetItemQualityColor(entry.quality)
+                dr.label:SetText(entry.name)
+                dr.label:SetTextColor(r, g, b)
+                dr.itemId   = entry.itemId
+                dr.itemLink = entry.link
+                dr.itemName = entry.name
+                dr:Show()
+            else
+                dr:Hide()
+            end
+        end
+        dropdown:Show()
+    end
+
+    addBox:SetScript("OnTextChanged", function(self)
+        local t = self:GetText()
+        if t and t ~= "" then addPlaceholder:Hide() else addPlaceholder:Show() end
+        if f.suppressSearch then return end
+        -- Guard: WoW may fire OnTextChanged twice after SetText; don't clear
+        -- the selection if the text still matches what was just selected.
+        if f.selectedItemId and t == f.selectedItemName then return end
+        f.selectedItemId   = nil
+        f.selectedItemLink = nil
+        f.selectedItemName = nil
+        UpdateDropdown(t)
+    end)
+
+    local function DoAdd()
+        local text = strtrim(addBox:GetText() or "")
+        if text == "" then return end
+        local itemId, itemLink
+        if f.selectedItemId then
+            -- Came from dropdown click
+            itemId   = f.selectedItemId
+            itemLink = f.selectedItemLink or ""
+        elseif text:find("item:") then
+            -- Pasted a full item hyperlink
+            itemId   = tonumber(text:match("item:(%d+)"))
+            itemLink = text
+        elseif tonumber(text) then
+            -- Typed a raw item ID
+            itemId = tonumber(text)
+            local _, lnk = GetItemInfo(itemId)
+            itemLink = lnk or ""
+        end
+        if not itemId then
+            BRutus:Print("[Wishlist] Selecione da lista, cole um item link ou digite o ID do item.")
+            return
+        end
+        if BRutus.Wishlist then
+            BRutus.Wishlist:AddToWishlist(itemId, itemLink, f.osToggle.isOS)
+        end
+        addBox:SetText("")
+        addBox:ClearFocus()
+        f.selectedItemId   = nil
+        f.selectedItemLink = nil
+        f.selectedItemName = nil
+        dropdown:Hide()
+    end
+
+    addBox:SetScript("OnEnterPressed", function(self) DoAdd(); self:ClearFocus() end)
+    addBox:SetScript("OnEscapePressed", function(self)
+        self:ClearFocus()
+        dropdown:Hide()
+    end)
+    f.addBox = addBox
+
+    local addBtn = UI:CreateButton(f, "+ Adicionar", 88, 28)
+    addBtn:SetPoint("BOTTOMLEFT", addBox, "BOTTOMRIGHT", 6, 0)
+    addBtn:SetScript("OnClick", DoAdd)
+
+    -- Sync button — anchored to the right, with guaranteed gap from addBtn
+    local syncBtn = UI:CreateButton(f, "Sync", 80, 28)
+    syncBtn:SetPoint("BOTTOMRIGHT", -8, 11)
+    syncBtn:SetScript("OnClick", function()
+        if BRutus.Wishlist then BRutus.Wishlist:BroadcastMyWishlist() end
+        BRutus:Print("[Wishlist] Enviado para a guild.")
+    end)
+
+    BRutus.WishlistFrame = f
+    return f
+end
+
+function BRutus:ShowWishlistFrame()
+    if not self.WishlistFrame then
+        BuildWishlistFrame()
+    end
+    self:RefreshWishlistFrame()
+    self.WishlistFrame:Show()
+end
+
+function BRutus:RefreshWishlistFrame()
+    local f = self.WishlistFrame
+    if not f then return end
+
+    local list = (BRutus.db and BRutus.db.myWishlist) or {}
+    local total = #list
+
+    f.counterText:SetText(total .. "/50")
+
+    local offset = FauxScrollFrame_GetOffset(f.scrollFrame)
+    FauxScrollFrame_Update(f.scrollFrame, total, WISH_VISIBLE, WISH_ROW_HEIGHT)
+
+    for i = 1, WISH_VISIBLE do
+        local row     = f.rows[i]
+        local dataIdx = offset + i
+
+        if dataIdx <= total then
+            local entry = list[dataIdx]
+            local bgColor = (i % 2 == 0) and C.row2 or C.row1
+            row.defaultBg = bgColor
+            row:SetBackdropColor(bgColor.r, bgColor.g, bgColor.b, bgColor.a)
+
+            row.itemId   = entry.itemId
+            row.itemLink = entry.itemLink or ""
+
+            row.numText:SetText(entry.order or dataIdx)
+
+            -- Item display: always resolve via GetItemInfo for correct locale.
+            -- Fall back to stored link only if item not yet in client cache.
+            local localName, localLink = GetItemInfo(entry.itemId)
+            if localLink then
+                row.itemText:SetText(localLink)
+            elseif localName then
+                row.itemText:SetText(localName)
+            elseif entry.itemLink and entry.itemLink ~= "" then
+                row.itemText:SetText(entry.itemLink)
+            else
+                row.itemText:SetText("Item #" .. entry.itemId)
+            end
+
+            row.itemText:SetTextColor(C.white.r, C.white.g, C.white.b)
+            if entry.isOffspec then
+                row.typeText:SetText("|cffAAAAAA  OS|r")
+            else
+                row.typeText:SetText("|cff4CB5FF  MS|r")
+            end
+
+            row:Show()
+        else
+            row:Hide()
+        end
+    end
+end
+
+----------------------------------------------------------------------
+-- OFFICER PRIO MODAL — manage item priorities (officer-only)
+-- Accessible via the Wishlist panel "Gerenciar Prios" button.
+----------------------------------------------------------------------
+local PRIO_ROW_HEIGHT = 28
+local PRIO_VISIBLE    = 14
+
+local function BuildPrioModal()
+    local f = CreateFrame("Frame", "BRutusPrioModal", UIParent, "BackdropTemplate")
+    f:SetSize(560, 500)
+    f:SetPoint("CENTER")
+    f:SetBackdrop({
+        bgFile   = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = 1,
+    })
+    f:SetBackdropColor(0.06, 0.05, 0.10, 0.98)
+    f:SetBackdropBorderColor(C.gold.r, C.gold.g, C.gold.b, 0.8)
+    f:SetFrameStrata("DIALOG")
+    f:SetFrameLevel(60)
+    f:SetMovable(true)
+    f:EnableMouse(true)
+    f:RegisterForDrag("LeftButton")
+    f:SetScript("OnDragStart", function(self) self:StartMoving() end)
+    f:SetScript("OnDragStop",  function(self) self:StopMovingOrSizing() end)
+    f:Hide()
+
+    table.insert(UISpecialFrames, "BRutusPrioModal")
+
+    -- Title bar
+    local titleBg = f:CreateTexture(nil, "BACKGROUND", nil, 1)
+    titleBg:SetTexture("Interface\\Buttons\\WHITE8x8")
+    titleBg:SetPoint("TOPLEFT"); titleBg:SetPoint("TOPRIGHT"); titleBg:SetHeight(40)
+    titleBg:SetVertexColor(C.headerBg.r, C.headerBg.g, C.headerBg.b, 1.0)
+
+    local titleText = f:CreateFontString(nil, "OVERLAY")
+    titleText:SetFont("Fonts\\FRIZQT__.TTF", 13, "OUTLINE")
+    titleText:SetPoint("LEFT", 14, 0); titleText:SetPoint("TOP", 0, -12)
+    titleText:SetTextColor(C.gold.r, C.gold.g, C.gold.b)
+    titleText:SetText("GERENCIAR PRIORIDADES")
+    f.titleText = titleText
+
+    local titleLine = UI:CreateAccentLine(f, 2)
+    titleLine:SetPoint("TOPLEFT", 0, -40); titleLine:SetPoint("TOPRIGHT", 0, -40)
+
+    local closeBtn = UI:CreateCloseButton(f)
+    closeBtn:SetPoint("TOPRIGHT", -4, -8)
+    closeBtn:SetScript("OnClick", function() f:Hide() end)
+
+    -- Subtitle: shows currently loaded item
+    local subtitleText = f:CreateFontString(nil, "OVERLAY")
+    subtitleText:SetFont("Fonts\\FRIZQT__.TTF", 11, "OUTLINE")
+    subtitleText:SetPoint("LEFT", 14, 0); subtitleText:SetPoint("TOP", 0, -28)
+    subtitleText:SetTextColor(C.silver.r, C.silver.g, C.silver.b, 0.7)
+    subtitleText:SetText("Busque um item para gerenciar prioridades")
+
+    -- Item search bar
+    local searchBg = f:CreateTexture(nil, "BACKGROUND")
+    searchBg:SetTexture("Interface\\Buttons\\WHITE8x8")
+    searchBg:SetPoint("TOPLEFT", 1, -42); searchBg:SetPoint("TOPRIGHT", -1, -42)
+    searchBg:SetHeight(36)
+    searchBg:SetVertexColor(0.08, 0.08, 0.12, 1.0)
+
+    local LoadItem  -- forward declaration
+
+    local searchBox = CreateFrame("EditBox", "BRutusPrioSearchBox", f, "BackdropTemplate")
+    searchBox:SetSize(320, 26)
+    searchBox:SetPoint("LEFT", 10, 0); searchBox:SetPoint("TOP", 0, -52)
+    searchBox:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
+    searchBox:SetBackdropColor(0.05, 0.05, 0.08, 1.0)
+    searchBox:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.4)
+    searchBox:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
+    searchBox:SetTextColor(C.white.r, C.white.g, C.white.b)
+    searchBox:SetTextInsets(6, 6, 0, 0)
+    searchBox:SetAutoFocus(false)
+    searchBox:SetMaxLetters(200)
+
+    local placeholder = searchBox:CreateFontString(nil, "OVERLAY")
+    placeholder:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
+    placeholder:SetPoint("LEFT", 6, 0)
+    placeholder:SetTextColor(0.4, 0.4, 0.4)
+    placeholder:SetText("Buscar item, cole link ou ID...")
+
+    -- Search dropdown
+    local PDROP_ROWS  = 6
+    local PDROP_ROW_H = 22
+
+    local prioDropdown = CreateFrame("Frame", nil, f, "BackdropTemplate")
+    prioDropdown:SetWidth(320)
+    prioDropdown:SetHeight(PDROP_ROWS * PDROP_ROW_H + 2)
+    prioDropdown:SetPoint("TOPLEFT", searchBox, "BOTTOMLEFT", 0, -2)
+    prioDropdown:SetBackdrop({
+        bgFile   = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = 1,
+    })
+    prioDropdown:SetBackdropColor(0.05, 0.05, 0.10, 0.98)
+    prioDropdown:SetBackdropBorderColor(C.accent.r, C.accent.g, C.accent.b, 0.7)
+    prioDropdown:SetFrameLevel(f:GetFrameLevel() + 20)
+    prioDropdown:Hide()
+
+    prioDropdown.rows = {}
+    for i = 1, PDROP_ROWS do
+        local dr = CreateFrame("Button", nil, prioDropdown)
+        dr:SetHeight(PDROP_ROW_H)
+        dr:SetPoint("TOPLEFT",  1, -((i - 1) * PDROP_ROW_H) - 1)
+        dr:SetPoint("TOPRIGHT", -1, -((i - 1) * PDROP_ROW_H) - 1)
+        dr:SetHighlightTexture("Interface\\Buttons\\WHITE8x8")
+        dr:GetHighlightTexture():SetVertexColor(C.rowHover.r, C.rowHover.g, C.rowHover.b, 0.3)
+        local drText = dr:CreateFontString(nil, "OVERLAY")
+        drText:SetFont("Fonts\\FRIZQT__.TTF", 11, "OUTLINE")
+        drText:SetPoint("LEFT", 6, 0)
+        drText:SetPoint("RIGHT", -6, 0)
+        drText:SetJustifyH("LEFT")
+        drText:SetWordWrap(false)
+        dr.label = drText
+        dr:SetScript("OnClick", function()
+            f.prioSearchItemId   = dr.itemId
+            f.prioSearchItemName = dr.itemName
+            f.suppressPrioSearch = true
+            searchBox:SetText(dr.itemName or "")
+            f.suppressPrioSearch = nil
+            placeholder:Hide()
+            prioDropdown:Hide()
+            if LoadItem then LoadItem() end
+        end)
+        prioDropdown.rows[i] = dr
+        dr:Hide()
+    end
+
+    local function UpdatePrioDropdown(query)
+        query = strlower(strtrim(query or ""))
+        if query == "" or query:find("item:", 1, true) or tonumber(query) then
+            prioDropdown:Hide()
+            return
+        end
+        local results = {}
+        if BRutus.Wishlist and BRutus.Wishlist.itemIndex then
+            for itemId in pairs(BRutus.Wishlist.itemIndex) do
+                local name, _, quality = GetItemInfo(itemId)
+                if name and strlower(name):find(query, 1, true) then
+                    tinsert(results, { itemId = itemId, name = name, quality = quality or 1 })
+                end
+            end
+        end
+        table.sort(results, function(a, b) return a.name < b.name end)
+        if #results == 0 then
+            prioDropdown:Hide()
+            return
+        end
+        local shown = math.min(#results, PDROP_ROWS)
+        prioDropdown:SetHeight(shown * PDROP_ROW_H + 2)
+        for i = 1, PDROP_ROWS do
+            local dr = prioDropdown.rows[i]
+            if i <= shown then
+                local entry = results[i]
+                local r, g, b = GetItemQualityColor(entry.quality)
+                dr.label:SetText(entry.name)
+                dr.label:SetTextColor(r, g, b)
+                dr.itemId   = entry.itemId
+                dr.itemName = entry.name
+                dr:Show()
+            else
+                dr:Hide()
+            end
+        end
+        prioDropdown:Show()
+    end
+
+    searchBox:SetScript("OnTextChanged", function(self)
+        local t = self:GetText()
+        if t and t ~= "" then placeholder:Hide() else placeholder:Show() end
+        if f.suppressPrioSearch then return end
+        if f.prioSearchItemName and t == f.prioSearchItemName then return end
+        f.prioSearchItemId   = nil
+        f.prioSearchItemName = nil
+        UpdatePrioDropdown(t)
+    end)
+    searchBox:SetScript("OnEscapePressed", function(self)
+        self:ClearFocus()
+        prioDropdown:Hide()
+    end)
+
+    local loadBtn = UI:CreateButton(f, "Carregar", 90, 26)
+    loadBtn:SetPoint("LEFT", searchBox, "RIGHT", 8, 0)
+
+    -- Status line
+    local statusText = f:CreateFontString(nil, "OVERLAY")
+    statusText:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
+    statusText:SetPoint("LEFT", loadBtn, "RIGHT", 10, 0)
+    statusText:SetWidth(120)
+    statusText:SetTextColor(C.silver.r, C.silver.g, C.silver.b)
+    statusText:SetText("")
+    f.statusText = statusText
+
+    -- Column headers: #PRIO | NOME | WL# | ACOES
+    local hdrBg = f:CreateTexture(nil, "BACKGROUND")
+    hdrBg:SetTexture("Interface\\Buttons\\WHITE8x8")
+    hdrBg:SetPoint("TOPLEFT", 1, -78); hdrBg:SetPoint("TOPRIGHT", -1, -78)
+    hdrBg:SetHeight(22)
+    hdrBg:SetVertexColor(C.headerBg.r, C.headerBg.g, C.headerBg.b, 0.9)
+
+    local function PrioHdr(lbl, x, w, justify)
+        local t = f:CreateFontString(nil, "OVERLAY")
+        t:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
+        t:SetTextColor(C.gold.r, C.gold.g, C.gold.b)
+        t:SetPoint("TOPLEFT", x, -82)
+        t:SetWidth(w); t:SetJustifyH(justify or "LEFT")
+        t:SetText(lbl)
+    end
+    PrioHdr("#PRIO",  10,  40, "CENTER")
+    PrioHdr("NOME",   56, 170, "LEFT")
+    PrioHdr("WL #",  230,  50, "CENTER")
+    PrioHdr("ACOES", 290,  80, "CENTER")
+
+    -- Scroll area
+    local scrollCont = CreateFrame("Frame", nil, f)
+    scrollCont:SetPoint("TOPLEFT",     1, -100)
+    scrollCont:SetPoint("BOTTOMRIGHT", -1,  44)
+
+    local scrollFrame = CreateFrame("ScrollFrame", "BRutusPrioScroll", scrollCont, "FauxScrollFrameTemplate")
+    scrollFrame:SetPoint("TOPLEFT", 0, 0); scrollFrame:SetPoint("BOTTOMRIGHT", 0, 0)
+    UI:SkinScrollBar(scrollFrame, "BRutusPrioScroll")
+    f.scrollFrame = scrollFrame
+
+    f.rows = {}
+    for i = 1, PRIO_VISIBLE do
+        local row = CreateFrame("Frame", "BRutusPrioRow" .. i, scrollCont, "BackdropTemplate")
+        row:SetHeight(PRIO_ROW_HEIGHT)
+        row:SetPoint("TOPLEFT",  0, -((i - 1) * PRIO_ROW_HEIGHT))
+        row:SetPoint("RIGHT", scrollCont, "RIGHT", -18, 0)
+        row:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
+        local bgColor = (i % 2 == 0) and C.row2 or C.row1
+        row:SetBackdropColor(bgColor.r, bgColor.g, bgColor.b, bgColor.a)
+        row.defaultBg = bgColor
+
+        -- #PRIO number
+        local prioOrderText = row:CreateFontString(nil, "OVERLAY")
+        prioOrderText:SetFont("Fonts\\FRIZQT__.TTF", 11, "OUTLINE")
+        prioOrderText:SetPoint("LEFT", 10, 0); prioOrderText:SetWidth(40); prioOrderText:SetJustifyH("CENTER")
+        prioOrderText:SetTextColor(C.gold.r, C.gold.g, C.gold.b)
+        row.prioOrderText = prioOrderText
+
+        -- Character name (class-colored)
+        local nameText = row:CreateFontString(nil, "OVERLAY")
+        nameText:SetFont("Fonts\\FRIZQT__.TTF", 12, "OUTLINE")
+        nameText:SetPoint("LEFT", 56, 0); nameText:SetWidth(170); nameText:SetJustifyH("LEFT")
+        row.nameText = nameText
+
+        -- WL order
+        local wlOrderText = row:CreateFontString(nil, "OVERLAY")
+        wlOrderText:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
+        wlOrderText:SetPoint("LEFT", 230, 0); wlOrderText:SetWidth(50); wlOrderText:SetJustifyH("CENTER")
+        row.wlOrderText = wlOrderText
+
+        -- ↑ reorder up
+        local upBtn = CreateFrame("Button", nil, row)
+        upBtn:SetSize(18, 18); upBtn:SetPoint("LEFT", 292, 0)
+        upBtn:SetNormalTexture("Interface\\BUTTONS\\Arrow-Up-Up")
+        upBtn:SetHighlightTexture("Interface\\BUTTONS\\Arrow-Up-Up")
+        row.upBtn = upBtn
+
+        -- ↓ reorder down
+        local downBtn = CreateFrame("Button", nil, row)
+        downBtn:SetSize(18, 18); downBtn:SetPoint("LEFT", 313, 0)
+        downBtn:SetNormalTexture("Interface\\BUTTONS\\Arrow-Down-Up")
+        downBtn:SetHighlightTexture("Interface\\BUTTONS\\Arrow-Down-Up")
+        row.downBtn = downBtn
+
+        -- × remove
+        local removeBtn = CreateFrame("Button", nil, row)
+        removeBtn:SetSize(18, 18); removeBtn:SetPoint("LEFT", 338, 0)
+        local removeTex = removeBtn:CreateFontString(nil, "OVERLAY")
+        removeTex:SetFont("Fonts\\FRIZQT__.TTF", 14, "OUTLINE")
+        removeTex:SetPoint("CENTER")
+        removeTex:SetTextColor(0.7, 0.2, 0.2)
+        removeTex:SetText("x")
+        removeBtn:SetScript("OnEnter", function() removeTex:SetTextColor(1, 0.3, 0.3) end)
+        removeBtn:SetScript("OnLeave", function() removeTex:SetTextColor(0.7, 0.2, 0.2) end)
+        row.removeBtn = removeBtn
+
+        row:Hide()
+        f.rows[i] = row
+    end
+
+    scrollFrame:SetScript("OnVerticalScroll", function(self, offset)
+        FauxScrollFrame_OnVerticalScroll(self, offset, PRIO_ROW_HEIGHT, function()
+            BRutus:RefreshPrioModal()
+        end)
+    end)
+
+    -- Bottom bar
+    local bottomBg = f:CreateTexture(nil, "BACKGROUND")
+    bottomBg:SetTexture("Interface\\Buttons\\WHITE8x8")
+    bottomBg:SetPoint("BOTTOMLEFT"); bottomBg:SetPoint("BOTTOMRIGHT"); bottomBg:SetHeight(44)
+    bottomBg:SetVertexColor(C.headerBg.r, C.headerBg.g, C.headerBg.b, 1.0)
+    local bottomLine = UI:CreateAccentLine(f, 1)
+    bottomLine:SetPoint("BOTTOMLEFT", 0, 44); bottomLine:SetPoint("BOTTOMRIGHT", 0, 44)
+
+    local saveBtn = UI:CreateButton(f, "Salvar e Sync", 130, 26)
+    saveBtn:SetPoint("BOTTOMRIGHT", -10, 10)
+    saveBtn:SetScript("OnClick", function()
+        if not f.prioData or not f.currentItemId then
+            f.statusText:SetText("|cffFF4444Nenhum item carregado.|r")
+            return
+        end
+        if not BRutus.db.lootPrios then BRutus.db.lootPrios = {} end
+        local prioList = {}
+        for order, entry in ipairs(f.prioData) do
+            table.insert(prioList, {
+                name  = entry.name,
+                class = entry.class,
+                order = order,
+            })
+        end
+        BRutus.db.lootPrios[f.currentItemId] = prioList
+        if BRutus.Wishlist then
+            BRutus.Wishlist:BroadcastLootPrios()
+        end
+        f.statusText:SetText("|cff4CFF4CSalvo e enviado!|r")
+        BRutus:Print("[Prio] Prioridades salvas e sincronizadas.")
+    end)
+
+    local cancelBtn = UI:CreateButton(f, "Cancelar", 80, 26)
+    cancelBtn:SetPoint("BOTTOMRIGHT", saveBtn, "BOTTOMLEFT", -8, 0)
+    cancelBtn:SetScript("OnClick", function() f:Hide() end)
+
+    -- Help text in bottom bar
+    local bottomHelp = UI:CreateText(f, "Reordene com as setas. Apenas voce ve antes de salvar.", 9, 0.4, 0.4, 0.5)
+    bottomHelp:SetPoint("BOTTOMLEFT", 10, 14)
+
+    -- Wire up LoadItem
+    LoadItem = function()
+        local itemId = f.prioSearchItemId
+        f.prioSearchItemId = nil
+        if not itemId then
+            local text = strtrim(searchBox:GetText() or "")
+            if text == "" then return end
+            itemId = tonumber(text:match("item:(%d+)")) or tonumber(text)
+        end
+        if not itemId then
+            f.statusText:SetText("|cffFF4444Item invalido.|r")
+            return
+        end
+
+        f.currentItemId = itemId
+        f.prioData = {}
+
+        -- Collect who has this item on their wishlist
+        local wishEntries = {}
+        if BRutus.db.guildWishlists then
+            for _, charData in pairs(BRutus.db.guildWishlists) do
+                for _, wItem in ipairs(charData.wishlist or {}) do
+                    if wItem.itemId == itemId then
+                        table.insert(wishEntries, {
+                            name         = charData.name or "",
+                            class        = charData.class or "",
+                            wishlistOrder = wItem.order or 999,
+                        })
+                        break
+                    end
+                end
+            end
+        end
+
+        -- Start from saved prios (if any), then append remaining wishlist members
+        local savedPrios = BRutus.db.lootPrios and BRutus.db.lootPrios[itemId]
+        if savedPrios and #savedPrios > 0 then
+            local inPrio = {}
+            for _, pEntry in ipairs(savedPrios) do
+                local wlOrd = 999
+                for _, we in ipairs(wishEntries) do
+                    if strlower(we.name) == strlower(pEntry.name or "") then
+                        wlOrd = we.wishlistOrder
+                        break
+                    end
+                end
+                table.insert(f.prioData, {
+                    name         = pEntry.name or "",
+                    class        = pEntry.class or "",
+                    wishlistOrder = wlOrd,
+                })
+                inPrio[strlower(pEntry.name or "")] = true
+            end
+            table.sort(wishEntries, function(a, b) return a.wishlistOrder < b.wishlistOrder end)
+            for _, we in ipairs(wishEntries) do
+                if not inPrio[strlower(we.name)] then
+                    table.insert(f.prioData, we)
+                end
+            end
+        else
+            table.sort(wishEntries, function(a, b) return a.wishlistOrder < b.wishlistOrder end)
+            f.prioData = wishEntries
+        end
+
+        local itemName = GetItemInfo(itemId) or ("Item #" .. itemId)
+        f.statusText:SetText(format("|cffFFD700%s|r  %d interessados", itemName, #f.prioData))
+        subtitleText:SetText(itemName)
+        BRutus:RefreshPrioModal()
+    end
+
+    loadBtn:SetScript("OnClick", function()
+        prioDropdown:Hide()
+        LoadItem()
+    end)
+    searchBox:SetScript("OnEnterPressed", function(self)
+        prioDropdown:Hide()
+        LoadItem()
+        self:ClearFocus()
+    end)
+
+    BRutus.PrioModal = f
+    return f
+end
+
+function BRutus:ShowPrioModal()
+    if not BRutus:IsOfficer() then
+        BRutus:Print("|cffFF4444Apenas officers podem gerenciar prioridades.|r")
+        return
+    end
+    if not self.PrioModal then BuildPrioModal() end
+    self:RefreshPrioModal()
+    self.PrioModal:Show()
+end
+
+function BRutus:RefreshPrioModal()
+    local f = self.PrioModal
+    if not f or not f.prioData then return end
+
+    local data   = f.prioData
+    local total  = #data
+    local offset = FauxScrollFrame_GetOffset(f.scrollFrame)
+    FauxScrollFrame_Update(f.scrollFrame, total, PRIO_VISIBLE, PRIO_ROW_HEIGHT)
+
+    for i = 1, PRIO_VISIBLE do
+        local row     = f.rows[i]
+        local dataIdx = offset + i
+
+        if dataIdx <= total then
+            local entry = data[dataIdx]
+            local bgColor = (i % 2 == 0) and C.row2 or C.row1
+            row.defaultBg = bgColor
+            row:SetBackdropColor(bgColor.r, bgColor.g, bgColor.b, bgColor.a)
+
+            -- Prio position number
+            row.prioOrderText:SetText("#" .. dataIdx)
+
+            -- Character name (class-colored)
+            local cr, cg, cb = BRutus:GetClassColor(entry.class or "")
+            row.nameText:SetText(entry.name or "?")
+            row.nameText:SetTextColor(cr, cg, cb)
+
+            -- Wishlist order
+            if entry.wishlistOrder and entry.wishlistOrder < 999 then
+                row.wlOrderText:SetText("#" .. entry.wishlistOrder)
+                row.wlOrderText:SetTextColor(0.3, 0.7, 1.0)
+            else
+                row.wlOrderText:SetText("-")
+                row.wlOrderText:SetTextColor(0.4, 0.4, 0.4)
+            end
+
+            -- Wire ↑/↓
+            row.upBtn:SetScript("OnClick", function()
+                if dataIdx > 1 then
+                    data[dataIdx], data[dataIdx - 1] = data[dataIdx - 1], data[dataIdx]
+                    BRutus:RefreshPrioModal()
+                end
+            end)
+            row.downBtn:SetScript("OnClick", function()
+                if dataIdx < total then
+                    data[dataIdx], data[dataIdx + 1] = data[dataIdx + 1], data[dataIdx]
+                    BRutus:RefreshPrioModal()
+                end
+            end)
+
+            -- Remove
+            row.removeBtn:SetScript("OnClick", function()
+                table.remove(data, dataIdx)
+                BRutus:RefreshPrioModal()
+            end)
+
+            row:Show()
+        else
+            row:Hide()
+        end
+    end
 end
