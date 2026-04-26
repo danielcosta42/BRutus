@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.24.0] - 2026-04-26
+
+### Added
+- restrict wishlist access and display to officers only during testing
+
+
 ## [1.23.0] - 2026-04-26
 
 ### Added
