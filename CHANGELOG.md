@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.32.0] - 2026-04-26
+
+### Added
+- refactor duplicate session merging logic for improved clarity
+- update attunement display to show only game-verified data without alt-propagation
+- enhance encounter tracking and deduplication logic in raid sessions
+- improve session merging logic with debounce handling for incoming raid broadcasts
+
+
 ## [1.31.0] - 2026-04-26
 
 ### Added
