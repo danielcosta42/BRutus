@@ -5,6 +5,8 @@
 local RaidTracker = {}
 BRutus.RaidTracker = RaidTracker
 
+local _mergeDebounceTimer = nil  -- debounce handle for post-broadcast dedup
+
 -- TBC Raid instance IDs
 RaidTracker.RAID_INSTANCES = {
     [532]  = "Karazhan",
@@ -513,7 +515,7 @@ function RaidTracker:MergeDuplicateSessions()
     local sessions = BRutus.db.raidTracker.sessions
     if not sessions then return 0 end
 
-    local MERGE_WINDOW = 7200  -- sessions within 2h gap = same raid night
+    local MERGE_WINDOW = 1800  -- 30 min: covers wipe→run-back; separates distinct raid attempts
     local totalMerged = 0
 
     -- Group sessions by instanceID AND groupTag (don't merge sessions from different groups)
@@ -916,6 +918,25 @@ function RaidTracker:HandleIncoming(data)
             raidDB.sessions[sessionID] = session
         end
     end
+
+    -- Deduplicate: multiple officers may have broadcast the same raid with
+    -- slightly different startTimes. Run a debounced merge so all incoming
+    -- broadcasts are collected before the merge pass fires.
+    if _mergeDebounceTimer then
+        _mergeDebounceTimer:Cancel()
+    end
+    _mergeDebounceTimer = C_Timer.NewTimer(3, function()
+        _mergeDebounceTimer = nil
+        RaidTracker:MergeDuplicateSessions()
+        -- Refresh UI if the raids panel is open
+        if BRutus.RaidsPanelOpen then
+            BRutus:RefreshRaidsPanel(
+                BRutus.RaidsPanelOpen.sessionContent,
+                BRutus.RaidsPanelOpen.attContent,
+                BRutus.RaidsPanelOpen.statusText
+            )
+        end
+    end)
 end
 
 ----------------------------------------------------------------------
