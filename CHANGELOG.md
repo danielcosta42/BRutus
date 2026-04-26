@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.25.0] - 2026-04-26
+
+### Added
+- add event listener to refresh wishlist frame on item info received
+
+
 ## [1.24.1] - 2026-04-26
 
 ### Changed
