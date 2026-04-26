@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.27.0] - 2026-04-26
+
+### Added
+- enhance OnEnterWorld to handle initial login and UI reload scenarios
+
+
 ## [1.26.0] - 2026-04-26
 
 ### Added
