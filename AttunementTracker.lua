@@ -1,6 +1,21 @@
 ----------------------------------------------------------------------
 -- BRutus Guild Manager - Attunement Tracker
 -- Tracks TBC raid attunements via quest completion checks
+--
+-- NOTE on TBC Anniversary account-wide attunements:
+-- The Anniversary realm allows alts to enter attuned raids without
+-- completing the attunement chains themselves. This is enforced
+-- server-side and does NOT set any quest completion flags that the
+-- client API can detect. Investigation confirmed:
+--   - IsQuestFlaggedCompleted returns false for all attunement quests
+--     on alts that have account-wide access
+--   - The quest IDs that do appear completed on those alts (e.g.
+--     10120, 10140, 10289, 10291) are regular Hellfire Peninsula
+--     quests (confirmed from questcache.wdb), not attunement flags
+--   - Quest 10291 is definitively "Report to Nazgrel" (Thrallmar)
+--   - Quest 10120 is in zone 3483 (Hellfire Peninsula), Horde type
+-- Therefore, attunement status for alts with account-wide access
+-- will show as incomplete in this addon. This is a known limitation.
 ----------------------------------------------------------------------
 local AttunementTracker = {}
 BRutus.AttunementTracker = AttunementTracker
@@ -32,14 +47,6 @@ AttunementTracker.ATTUNEMENTS = {
         -- secondary confirmation that survives edge cases where the quest
         -- flag was not cached correctly on a given login.
         keyItemId = 24490,
-        -- TBC Anniversary account-wide attunement grant quest ID.
-        -- Blizzard flags this hidden server-side quest on alt characters
-        -- when the account-wide attunement is shared. It does NOT exist
-        -- in the original TBC quest database (no title, no DB entry).
-        -- Mapping confirmed: 10119 appears on alts but NOT on mains who
-        -- completed the normal Karazhan chain (quest 9838), proving it is
-        -- the anniversary grant for Kara specifically.
-        anniversaryQuestId = 10119,
     },
     {
         name = "Gruul's Lair",
@@ -50,9 +57,6 @@ AttunementTracker.ATTUNEMENTS = {
         finalQuestId = nil,
         note = "No attunement required",
         alwaysComplete = true,
-        -- Confirmed: 10120 appears on both mains and alts after T4 clearing.
-        -- Since alwaysComplete bypasses all checks, this is informational only.
-        anniversaryQuestId = 10120,
     },
     {
         name = "Magtheridon's Lair",
@@ -63,9 +67,6 @@ AttunementTracker.ATTUNEMENTS = {
         finalQuestId = nil,
         note = "No attunement required",
         alwaysComplete = true,
-        -- Confirmed: 10140 appears on both mains and alts after T4 clearing.
-        -- Since alwaysComplete bypasses all checks, this is informational only.
-        anniversaryQuestId = 10140,
     },
     {
         name = "Serpentshrine Cavern",
@@ -77,9 +78,6 @@ AttunementTracker.ATTUNEMENTS = {
         },
         finalQuestId = 10901,
         note = "Removed in patch 2.1.0 - Tracking for reference",
-        -- Confirmed: 10289 appears on both alts (account-wide) and mains
-        -- who completed SSC attunement. Validated via dumpquests comparison.
-        anniversaryQuestId = 10289,
     },
     {
         name = "Tempest Keep: The Eye",
@@ -94,9 +92,6 @@ AttunementTracker.ATTUNEMENTS = {
         },
         finalQuestId = 10901,
         note = "Removed in patch 2.1.0 - Tracking for reference",
-        -- Confirmed: 10291 appears on both alts (account-wide) and mains
-        -- who completed TK attunement. Validated via dumpquests comparison.
-        anniversaryQuestId = 10291,
     },
     {
         name = "Hyjal Summit",
@@ -108,8 +103,6 @@ AttunementTracker.ATTUNEMENTS = {
         },
         finalQuestId = 10445,
         note = "Removed in patch 2.1.0 - Tracking for reference",
-        -- anniversaryQuestId unknown — run '/br attune dumpquests' on a
-        -- character with T6 account-wide attunement to discover the ID.
     },
     {
         name = "Black Temple",
@@ -135,8 +128,6 @@ AttunementTracker.ATTUNEMENTS = {
             { id = 10985, name = "A Distraction for Akama" },
         },
         finalQuestId = 10985,
-        -- anniversaryQuestId unknown — run '/br attune dumpquests' on a
-        -- character with T6 account-wide attunement to discover the ID.
     },
     {
         name = "Sunwell Plateau",
@@ -237,23 +228,8 @@ function AttunementTracker:ScanAttunements()
             if not entry.complete and attunement.keyItemId then
                 entry.complete = (GetItemCount(attunement.keyItemId) or 0) > 0
             end
-            -- Tertiary check: TBC Anniversary account-wide attunement system
-            -- grants hidden server-side quest flags on alt characters instead
-            -- of the original quest IDs. Check anniversaryQuestId as fallback.
-            local anniversaryComplete = false
-            if not entry.complete and attunement.anniversaryQuestId then
-                anniversaryComplete = self:IsQuestComplete(attunement.anniversaryQuestId)
-                entry.complete = anniversaryComplete
-            end
-            -- If completed via account-wide anniversary grant, report full
-            -- progress (the normal chain was bypassed entirely).
-            if anniversaryComplete then
-                entry.progress = 1.0
-                entry.questsDone = total
-            else
-                entry.progress = total > 0 and (done / total) or 0
-                entry.questsDone = done
-            end
+            entry.progress = total > 0 and (done / total) or 0
+            entry.questsDone = done
             entry.questsTotal = total
             entry.questStatus = questStatus
         end
