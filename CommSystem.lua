@@ -281,12 +281,15 @@ end
 ----------------------------------------------------------------------
 -- Handle data request
 ----------------------------------------------------------------------
-function CommSystem:HandleRequest(sender, _data)
-    -- Someone is requesting our data, send it back
+function CommSystem:HandleRequest(_sender, _data)
+    -- Respond with a broadcast to the GUILD channel instead of a direct
+    -- WHISPER to the sender.  Using WHISPER caused "No player named X"
+    -- spam whenever the requester logged off between their REQUEST and our
+    -- staggered response — ChatThrottleLib would keep sending each queued
+    -- chunk even after the player went offline.  Broadcasting to GUILD is
+    -- safe and already happens every 5 minutes anyway.
     C_Timer.After(math.random() * 3, function()  -- Stagger responses
-        local myData = BRutus.DataCollector:GetBroadcastData()
-        local serialized = LibSerialize:Serialize(myData)
-        self:SendMessage(self.MSG_TYPES.RESPONSE, serialized, sender)
+        self:BroadcastMyData()
 
         -- Officers also send trial data
         if BRutus:IsOfficer() and BRutus.TrialTracker then
