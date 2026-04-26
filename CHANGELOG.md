@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.31.0] - 2026-04-26
+
+### Added
+- migrate wishlist data structure to per-character storage and update related functionality
+
+
 ## [1.30.0] - 2026-04-26
 
 ### Added
