@@ -24,19 +24,6 @@ function BRutus:CreateRaidsPanel(parent, _mainFrame)
     local statusText = UI:CreateText(scrollParent, "", 10, C.silver.r, C.silver.g, C.silver.b)
     statusText:SetPoint("TOPLEFT", 200, -4)
 
-    -- Export attendance button (25-man data)
-    local exportBtn = UI:CreateButton(scrollParent, "Export Attendance", 140, 22)
-    exportBtn:SetPoint("TOPRIGHT", 0, 0)
-    exportBtn:SetScript("OnClick", function()
-        if not BRutus.RaidTracker then return end
-        local json, err = BRutus.RaidTracker:ExportForTMB()
-        if not json then
-            BRutus:Print("|cffFF4444Export failed:|r " .. (err or "unknown error"))
-            return
-        end
-        BRutus:ShowExportPopup("Export de Presença (25-man)", json)
-    end)
-
     ----------------------------------------------------------------
     -- Sessions section (top ~40%)
     ----------------------------------------------------------------
