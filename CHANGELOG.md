@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.30.0] - 2026-04-26
+
+### Added
+- add manual close flags for HUD and consumable popup to improve user experience
+
+
 ## [1.29.0] - 2026-04-26
 
 ### Added
