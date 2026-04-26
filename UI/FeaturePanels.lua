@@ -115,7 +115,7 @@ function BRutus:RefreshRaidsPanel(sessionContent, attContent, statusText)
     ----------------------------------------------------------------
     -- Sessions grouped by instance + TBC reset week (Tuesday reset)
     ----------------------------------------------------------------
-    local sessions = BRutus.RaidTracker:GetRecentSessions(200, _raidFilter25)
+    local sessions = BRutus.RaidTracker:GetRecentSessions(200, _raidFilter25, true)
 
     -- TBC weekly reset epoch: 2006-01-03 00:00 UTC (a known Tuesday)
     local TUESDAY_EPOCH = 1136246400
@@ -278,11 +278,6 @@ function BRutus:RefreshRaidsPanel(sessionContent, attContent, statusText)
                 local sEncClr = sk > 0 and C.green or C.silver
                 UI:CreateText(row, sEncStr, 9, sEncClr.r, sEncClr.g, sEncClr.b)
                     :SetPoint("LEFT", 300, 0)
-
-                -- PUG badge
-                if sd.isGuildRaid == false then
-                    UI:CreateText(row, "[PUG]", 8, 0.6, 0.6, 0.6):SetPoint("LEFT", 400, 0)
-                end
 
                 -- Delete button (officer only)
                 if BRutus:IsOfficer() then

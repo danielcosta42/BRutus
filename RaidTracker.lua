@@ -481,11 +481,15 @@ function RaidTracker:GetAttendance25ManPercent(playerKey, groupTag)
     return math.floor((raids25 / total) * 100 + 0.5)
 end
 
-function RaidTracker:GetRecentSessions(limit, only25)
+function RaidTracker:GetRecentSessions(limit, only25, guildOnly)
     limit = limit or 20
     local sessions = {}
     for id, session in pairs(BRutus.db.raidTracker.sessions) do
-        if not only25 or self:Is25Man(session.instanceID) then
+        -- guildOnly: exclude sessions explicitly marked as non-guild raids.
+        -- Sessions without the flag (legacy data) are treated as guild raids.
+        if guildOnly and session.isGuildRaid == false then
+            -- skip
+        elseif not only25 or self:Is25Man(session.instanceID) then
             table.insert(sessions, { id = id, data = session })
         end
     end
