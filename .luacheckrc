@@ -85,6 +85,7 @@ read_globals = {
     "GetInventoryItemTexture",
     "GetInventoryItemQuality",
     "GetItemInfo",
+    "GetItemCount",
     "GetSpellInfo",
     "GetSpellTexture",
     "GetItemQualityColor",
