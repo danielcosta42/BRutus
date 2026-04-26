@@ -1661,6 +1661,14 @@ local function BuildWishlistFrame()
 
     table.insert(UISpecialFrames, "BRutusWishlistFrame")
 
+    -- Refresh rows whenever a queued item arrives from the server
+    f:RegisterEvent("GET_ITEM_INFO_RECEIVED")
+    f:SetScript("OnEvent", function(self, event)
+        if event == "GET_ITEM_INFO_RECEIVED" and self:IsShown() then
+            BRutus:RefreshWishlistFrame()
+        end
+    end)
+
     -- Title bar
     local titleBg = f:CreateTexture(nil, "BACKGROUND", nil, 1)
     titleBg:SetTexture("Interface\\Buttons\\WHITE8x8")
@@ -2069,6 +2077,12 @@ end
 function BRutus:ShowWishlistFrame()
     if not self.WishlistFrame then
         BuildWishlistFrame()
+    end
+    -- Pre-request item info for all wishlist entries so the client
+    -- fetches any uncached items before (or just after) we display them.
+    local list = (BRutus.db and BRutus.db.myWishlist) or {}
+    for _, entry in ipairs(list) do
+        GetItemInfo(entry.itemId)
     end
     self:RefreshWishlistFrame()
     self.WishlistFrame:Show()
