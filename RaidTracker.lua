@@ -74,6 +74,9 @@ function RaidTracker:Initialize()
     if rtDB.currentGroupTag == nil then rtDB.currentGroupTag = "" end
     self.currentGroupTag = rtDB.currentGroupTag
 
+    -- Ensure deletedSessions tombstone set exists (added later)
+    if rtDB.deletedSessions == nil then rtDB.deletedSessions = {} end
+
     -- One-time migration: detect old flat attendance structure and rebuild
     self:MigrateAttendanceIfNeeded()
 
@@ -732,6 +735,11 @@ function RaidTracker:DeleteSession(sessionID)
     if not session then return end
 
     BRutus.db.raidTracker.sessions[sessionID] = nil
+    -- Tombstone so peers can't re-insert this session via broadcast
+    if BRutus.db.raidTracker.deletedSessions == nil then
+        BRutus.db.raidTracker.deletedSessions = {}
+    end
+    BRutus.db.raidTracker.deletedSessions[sessionID] = true
     -- Rebuild from scratch so attendance stays consistent
     self:RebuildAttendanceFromSessions()
 
@@ -769,6 +777,9 @@ function RaidTracker:HandleDeleteIncoming(data)
     if not raidDB.sessions[sessionID] then return end  -- already gone
 
     raidDB.sessions[sessionID] = nil
+    -- Tombstone so re-broadcasts from outdated peers won't re-insert this session
+    if raidDB.deletedSessions == nil then raidDB.deletedSessions = {} end
+    raidDB.deletedSessions[sessionID] = true
     self:RebuildAttendanceFromSessions()
 
     -- Refresh UI if the raids panel is open
@@ -814,6 +825,10 @@ function RaidTracker:BroadcastRaidData()
             encounters = session.encounters,
         }
     end
+
+    -- Include tombstone set so peers learn about deletions even if they
+    -- missed the point-in-time RAID_DELETE message.
+    payload.deletedSessions = raidDB.deletedSessions or {}
 
     local LibSerialize = LibStub("LibSerialize")
     local serialized = LibSerialize:Serialize(payload)
@@ -872,9 +887,18 @@ function RaidTracker:HandleIncoming(data)
         end
     end
 
-    -- Merge sessions: add any session we don't already have
+    -- Apply tombstones sent by the peer (sessions they deleted)
+    local deleted = raidDB.deletedSessions
+    if deleted == nil then deleted = {}; raidDB.deletedSessions = deleted end
+    for sessionID, _ in pairs(payload.deletedSessions or {}) do
+        deleted[sessionID] = true
+        raidDB.sessions[sessionID] = nil  -- purge if we still had it
+    end
+
+    -- Merge sessions: add any session we don't already have,
+    -- but never re-insert sessions that have been tombstoned.
     for sessionID, session in pairs(payload.sessions or {}) do
-        if not raidDB.sessions[sessionID] then
+        if not deleted[sessionID] and not raidDB.sessions[sessionID] then
             raidDB.sessions[sessionID] = session
         end
     end

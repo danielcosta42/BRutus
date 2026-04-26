@@ -132,6 +132,7 @@ local DB_DEFAULTS = {
         sessions = {},
         attendance = {},
         currentGroupTag = "",
+        deletedSessions = {},  -- [sessionID] = true; permanent tombstone set
     },
     lootHistory = {},
     lootMaster = {

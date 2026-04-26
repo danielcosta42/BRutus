@@ -704,7 +704,7 @@ end
 ----------------------------------------------------------------------
 -- Handle incoming addon messages
 ----------------------------------------------------------------------
-function LootMaster:OnAddonMessage(prefix, msg, channel, _sender)
+function LootMaster:OnAddonMessage(prefix, msg, channel, sender)
     if prefix ~= "BRutusLM" then return end
     if channel ~= "RAID" and channel ~= "RAID_LEADER" then return end
 
@@ -734,10 +734,41 @@ function LootMaster:OnAddonMessage(prefix, msg, channel, _sender)
         end
 
     elseif cmd == "AWARD" then
-        -- ML awarded item (informational broadcast)
-        local awardedTo, link = rest:match("^([^|]+)|(.+)$")
+        -- ML awarded item.
+        -- Extended format: playerName|itemId|quality|raidName|itemLink
+        -- (raidName has no pipes; itemLink is the remainder so it can contain pipes)
+        local awardedTo, awardItemId, awardQuality, awardRaid, link =
+            rest:match("^([^|]+)|(%d+)|(%d+)|([^|]*)|(.+)$")
+        if not awardedTo then
+            -- Backward compat: old format playerName|itemLink
+            awardedTo, link = rest:match("^([^|]+)|(.+)$")
+        end
         if awardedTo and link then
             BRutus:Print(string.format("|cffFFD700Loot:|r %s awarded to |cff00ff00%s|r", link, awardedTo))
+
+            -- Record to loot history only if the sender is an officer and not ourselves
+            -- (the awarder already recorded locally in AwardLoot).
+            local senderName = sender and sender:match("^([^-]+)") or ""
+            if senderName ~= UnitName("player")
+                and BRutus:IsOfficerByName(senderName)
+                and BRutus.LootTracker
+            then
+                local realm = GetRealmName() or "Unknown"
+                local itemName = GetItemInfo(link)
+                local quality  = tonumber(awardQuality) or 4
+                BRutus.LootTracker:RecordMLAward({
+                    itemLink   = link,
+                    itemName   = itemName or "",
+                    quality    = quality,
+                    player     = awardedTo,
+                    playerKey  = awardedTo .. "-" .. realm,
+                    count      = 1,
+                    timestamp  = GetServerTime(),
+                    raid       = awardRaid or "",
+                    instanceID = 0,
+                    fromML     = true,
+                })
+            end
         end
     end
 end
@@ -945,14 +976,26 @@ function LootMaster:AwardLoot(playerName)
         end
     end
 
-    -- Broadcast award
-    local payload = string.format("AWARD|%s|%s", playerName, itemLink)
+    -- Gather extra context for history and broadcast
+    local _, _, itemQuality = GetItemInfo(itemLink)
+    itemQuality = itemQuality or 4
+    local _, _, _, _, _, _, _, instanceID = GetInstanceInfo()
+    local raidName = ""
+    if BRutus.RaidTracker and BRutus.RaidTracker.RAID_INSTANCES then
+        raidName = BRutus.RaidTracker.RAID_INSTANCES[instanceID] or ""
+    end
+    local realm = GetRealmName() or "Unknown"
+
+    -- Broadcast award (extended format: playerName|itemId|quality|raidName|itemLink)
+    -- Peers with BRutus will record this to their loot history after verifying
+    -- the sender is an officer.
+    local payload = string.format("AWARD|%s|%d|%d|%s|%s", playerName, itemId, itemQuality, raidName, itemLink)
     self:SafeSendAddon("BRutusLM", payload, "RAID")
 
     -- Announce
     self:SafeSendChat(string.format("{rt4} %s awarded to %s", itemLink, playerName), "RAID")
 
-    -- Save to award history
+    -- Save to LootMaster's own award log (for undo / ML reference)
     if not BRutus.db.lootMaster.awardHistory then
         BRutus.db.lootMaster.awardHistory = {}
     end
@@ -963,9 +1006,25 @@ function LootMaster:AwardLoot(playerName)
         timestamp = GetServerTime(),
         received = awarded,
     })
-    -- Cap history
     while #BRutus.db.lootMaster.awardHistory > 200 do
         table.remove(BRutus.db.lootMaster.awardHistory)
+    end
+
+    -- Record to the central loot history (ML-awarded items only, officer action)
+    if BRutus.LootTracker then
+        local itemName = GetItemInfo(itemLink)
+        BRutus.LootTracker:RecordMLAward({
+            itemLink   = itemLink,
+            itemName   = itemName or "",
+            quality    = itemQuality,
+            player     = playerName,
+            playerKey  = playerName .. "-" .. realm,
+            count      = 1,
+            timestamp  = GetServerTime(),
+            raid       = raidName,
+            instanceID = instanceID,
+            fromML     = true,
+        })
     end
 
     if awarded then
@@ -973,8 +1032,6 @@ function LootMaster:AwardLoot(playerName)
     else
         BRutus:Print(itemLink .. " awarded to |cff00ff00" .. playerName .. "|r - trade to deliver.")
     end
-
-    -- (Loot tracking is handled by LootTracker)
 
     self.activeLoot = nil
     self.rolls = {}

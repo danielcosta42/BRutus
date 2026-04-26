@@ -1,6 +1,8 @@
 ----------------------------------------------------------------------
 -- BRutus Guild Manager - Loot Tracker
--- Hooks loot distribution events, logs item/recipient/date
+-- Records items awarded by the Master Looter (officer-only).
+-- History is populated exclusively via RecordMLAward;
+-- generic CHAT_MSG_LOOT is NOT tracked.
 ----------------------------------------------------------------------
 local LootTracker = {}
 BRutus.LootTracker = LootTracker
@@ -9,72 +11,16 @@ function LootTracker:Initialize()
     if not BRutus.db.lootHistory then
         BRutus.db.lootHistory = {}
     end
-
-    local frame = CreateFrame("Frame")
-    frame:RegisterEvent("CHAT_MSG_LOOT")
-    frame:SetScript("OnEvent", function(_, event, ...)
-        if event == "CHAT_MSG_LOOT" then
-            LootTracker:OnLootMessage(...)
-        end
-    end)
 end
 
--- Parse loot messages
--- Format: "PlayerName receives loot: [Item Link]xCount."
--- Format: "You receive loot: [Item Link]."
-function LootTracker:OnLootMessage(msg)
-    if not msg then return end
-
-    -- Only track while in a raid/dungeon
-    local _, instanceType = GetInstanceInfo()
-    if instanceType ~= "raid" and instanceType ~= "party" then return end
-
-    local player, itemLink, count
-
-    -- "PlayerName receives loot: [Item Link]xCount."
-    player, itemLink, count = msg:match("(.+) receives loot: (|.+|r)x?(%d*)")
-    if not player then
-        -- "You receive loot: [Item Link]."
-        itemLink, count = msg:match("You receive loot: (|.+|r)x?(%d*)")
-        if itemLink then
-            player = UnitName("player")
-        end
+-- Record a master-loot award to the persistent history.
+-- Called by LootMaster:AwardLoot (locally) and by the AWARD
+-- addon message handler (peers, officer-verified).
+function LootTracker:RecordMLAward(entry)
+    if not BRutus.db.lootHistory then
+        BRutus.db.lootHistory = {}
     end
-
-    if not itemLink then return end
-    count = tonumber(count) or 1
-
-    -- Extract item info
-    local itemName, _, itemQuality = GetItemInfo(itemLink)
-    if not itemName then return end
-
-    -- Only track Rare (3) and above
-    if itemQuality < 3 then return end
-
-    local _, _, _, _, _, _, _, instanceID = GetInstanceInfo()
-    local raidName = ""
-    if BRutus.RaidTracker and BRutus.RaidTracker.RAID_INSTANCES then
-        raidName = BRutus.RaidTracker.RAID_INSTANCES[instanceID] or "Unknown"
-    end
-
-    local realm = GetRealmName()
-    local playerKey = player .. "-" .. realm
-
-    local entry = {
-        itemLink = itemLink,
-        itemName = itemName,
-        quality = itemQuality,
-        player = player,
-        playerKey = playerKey,
-        count = count,
-        timestamp = GetServerTime(),
-        raid = raidName,
-        instanceID = instanceID,
-    }
-
     table.insert(BRutus.db.lootHistory, 1, entry)
-
-    -- Cap history at 500 entries
     while #BRutus.db.lootHistory > 500 do
         table.remove(BRutus.db.lootHistory)
     end
