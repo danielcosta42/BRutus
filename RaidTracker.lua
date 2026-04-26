@@ -421,7 +421,8 @@ end
 function RaidTracker:GetTotalSessions(groupTag)
     local seen = {}
     for _, session in pairs(BRutus.db.raidTracker.sessions) do
-        if session.isGuildRaid then
+        -- isGuildRaid ~= false: include old sessions without the flag (legacy data)
+        if session.isGuildRaid ~= false then
             local sg = session.groupTag or ""
             if not groupTag or sg == groupTag then
                 local key = sg .. "|" .. (session.instanceID or 0) .. "_" .. self:GetWeekNum(session.startTime or 0)
@@ -438,7 +439,8 @@ end
 function RaidTracker:GetTotal25ManSessions(groupTag)
     local seen = {}
     for _, session in pairs(BRutus.db.raidTracker.sessions) do
-        if session.isGuildRaid and self:Is25Man(session.instanceID) then
+        -- isGuildRaid ~= false: include old sessions without the flag (legacy data)
+        if session.isGuildRaid ~= false and self:Is25Man(session.instanceID) then
             local sg = session.groupTag or ""
             if not groupTag or sg == groupTag then
                 local key = sg .. "|" .. session.instanceID .. "_" .. self:GetWeekNum(session.startTime or 0)
@@ -587,6 +589,11 @@ function RaidTracker:MergeDuplicateSessions()
                             return (x.time or 0) < (y.time or 0)
                         end)
 
+                        -- Preserve isGuildRaid: if either session was a guild raid, mark merged as such
+                        if b.data.isGuildRaid then
+                            a.data.isGuildRaid = true
+                        end
+
                         sessions[b.id] = nil
                         totalMerged = totalMerged + 1
                         changed = true
@@ -599,11 +606,10 @@ function RaidTracker:MergeDuplicateSessions()
 
     if totalMerged > 0 then
         BRutus:Print("|cff00FF00BRutus: merged " .. totalMerged
-            .. " duplicate raid session(s). Rebuilding attendance…|r")
-        self:RebuildAttendanceFromSessions()
-    else
-        BRutus:Print("|cffAAAAAA[BRutus] No duplicate raid sessions found.|r")
+            .. " duplicate raid session(s).|r")
     end
+    -- Always rebuild so attendance stays consistent with the session DB
+    self:RebuildAttendanceFromSessions()
     return totalMerged
 end
 
@@ -619,7 +625,8 @@ function RaidTracker:RebuildAttendanceFromSessions()
     local lockouts = {}
     local lockoutOrder = {}
     for _, session in pairs(BRutus.db.raidTracker.sessions) do
-        if session.isGuildRaid then
+        -- isGuildRaid ~= false: include old sessions without the flag (legacy data)
+        if session.isGuildRaid ~= false then
             local weekNum    = self:GetWeekNum(session.startTime or 0)
             local groupTag   = session.groupTag or ""
             -- Each group+instance+week is its own lockout; groups never share a lockout
