@@ -628,8 +628,8 @@ function RaidTracker:MergeDuplicateSessions()
                         for _, enc in ipairs(allEncs) do
                             local isDup = false
                             local encT  = enc.startTime or 0
-                            for i = #dedupedEncs, 1, -1 do
-                                local prev = dedupedEncs[i]
+                            for j = #dedupedEncs, 1, -1 do
+                                local prev = dedupedEncs[j]
                                 if encT - (prev.startTime or 0) > ENC_PROX then break end
                                 if prev.id == enc.id and prev.success == enc.success then
                                     isDup = true; break
