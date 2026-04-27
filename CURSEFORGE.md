@@ -114,7 +114,7 @@ Automatically tracks quest-based attunement progress for:
 ### 📣 Recruitment System (Officer Only)
 - **Auto-recruit popups** — a notification appears at configurable intervals; click to post your recruitment message
 - **Send Now** button for instant posting
-- **Welcome whisper** — automatically greets new guild members with a custom message and Discord link
+- **Welcome message** — automatically posts a greeting in guild chat when a new member joins, with customizable message and Discord link
 - **Channel management** — post to LookingForGroup, Trade, or any custom channel
 - Full configuration UI in the dedicated Recruitment tab
 

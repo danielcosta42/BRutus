@@ -69,7 +69,7 @@ CommSystem.pendingMessages = {}  -- [sender] = { chunks = {}, total = 0, receive
 ----------------------------------------------------------------------
 -- Send a message to guild (with chunking for large payloads)
 ----------------------------------------------------------------------
-function CommSystem:SendMessage(msgType, data, target)
+function CommSystem:SendMessage(msgType, data, target, priority)
     local payload = msgType .. ":" .. (data or "")
 
     -- Compress
@@ -80,7 +80,7 @@ function CommSystem:SendMessage(msgType, data, target)
     if len <= 253 then
         -- Single message, no chunking needed (prefix with "S:")
         local msg = "S:" .. encoded
-        self:SendRaw(msg, target)
+        self:SendRaw(msg, target, priority)
     else
         -- Multi-chunk: prefix each with "M:chunkIndex:totalChunks:msgId:"
         local msgId = string.format("%X", math.random(0, 0xFFFF))
@@ -91,17 +91,17 @@ function CommSystem:SendMessage(msgType, data, target)
             local chunk = encoded:sub(startPos, endPos)
             local header = string.format("M:%s:%d:%d:", msgId, i, totalChunks)
             C_Timer.After((i - 1) * 0.1, function()
-                self:SendRaw(header .. chunk, target)
+                self:SendRaw(header .. chunk, target, priority)
             end)
         end
     end
 end
 
-function CommSystem:SendRaw(msg, target)
+function CommSystem:SendRaw(msg, target, priority)
     if target then
         ChatThrottleLib:SendAddonMessage("NORMAL", BRutus.PREFIX, msg, "WHISPER", target)
     else
-        ChatThrottleLib:SendAddonMessage("BULK", BRutus.PREFIX, msg, "GUILD")
+        ChatThrottleLib:SendAddonMessage(priority or "BULK", BRutus.PREFIX, msg, "GUILD")
     end
 end
 

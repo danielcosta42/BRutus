@@ -480,10 +480,10 @@ function Recruitment:RegisterWelcomeEvent()
             if Recruitment._welcomedRecently[newMember .. "_sent"] then return end
             Recruitment._welcomedRecently[newMember .. "_sent"] = true
 
-            -- Broadcast claim so other officer clients suppress their sends
+            -- Broadcast claim with NORMAL priority so other clients suppress before their timer fires
             if BRutus.CommSystem then
                 BRutus.CommSystem:SendMessage(
-                    BRutus.CommSystem.MSG_TYPES.WELCOME_CLAIM, newMember)
+                    BRutus.CommSystem.MSG_TYPES.WELCOME_CLAIM, newMember, nil, "NORMAL")
             end
 
             local settings = BRutus.db.recruitment

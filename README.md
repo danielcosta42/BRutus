@@ -96,7 +96,7 @@ Also tracks Heroic dungeon key reputation requirements (Honor Hold/Thrallmar, Ce
 ### Recruitment System (Officer Only)
 - **Auto-recruit popup** — a notification appears on a configurable interval; click it to send your recruitment message to chat channels (LookingForGroup, Trade, etc.)
 - **Send Now button** in the Recruitment tab for instant posting
-- **Welcome message** — automatically whispers new guild members with a customizable greeting and Discord link
+- **Welcome message** — automatically posts a greeting in guild chat when a new member joins, with customizable message and Discord link
 - **Guild invite** via `/brutus recruit invite <Player>`
 - Full configuration UI in the Recruitment tab: message, interval, channels, welcome text, Discord link
 
@@ -133,7 +133,7 @@ Pressing **J** (or however you open the guild frame) opens BRutus instead of the
 | `/brutus recruit msg <text>` | Set recruitment message |
 | `/brutus recruit interval <sec>` | Set popup interval (min 60s) |
 | `/brutus recruit channel add/remove/list <name>` | Manage channels |
-| `/brutus recruit welcome on/off` | Toggle welcome whisper |
+| `/brutus recruit welcome on/off` | Toggle welcome message |
 | `/brutus recruit welcome msg <text>` | Set welcome message |
 | `/brutus recruit discord <link>` | Set Discord link |
 | `/brutus recruit invite <Player>` | Send guild invite |
