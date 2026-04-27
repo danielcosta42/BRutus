@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.36.0] - 2026-04-27
+
+### Added
+- add addon version tracking to broadcast data and roster UI for version comparison
+- update welcome message functionality to post in guild chat and add priority handling for message broadcasting
+
+
 ## [1.35.0] - 2026-04-26
 
 ### Added
