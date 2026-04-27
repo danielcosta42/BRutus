@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.35.0] - 2026-04-26
+
+### Added
+- modify HandleRequest to broadcast data to GUILD instead of WHISPER to prevent spam
+
+
 ## [1.34.0] - 2026-04-26
 
 ### Added
