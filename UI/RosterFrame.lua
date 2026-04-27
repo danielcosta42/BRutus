@@ -645,6 +645,7 @@ function BRutus.CreateRosterFrame()
                         race = addonData.race or "",
                         lastUpdate = addonData.lastUpdate or 0,
                         lastSync = addonData.lastSync or 0,
+                        addonVersion = addonData.addonVersion,
                         hasAddonData = (addonData.lastUpdate ~= nil and addonData.lastUpdate ~= 0),
                     })
                 end
@@ -981,6 +982,11 @@ function UpdateRosterRow(row, data, rowIndex)
     -- Addon data indicator
     if data.hasAddonData then
         row.addonDot:Show()
+        if data.addonVersion and data.addonVersion ~= BRutus.VERSION then
+            row.addonDot:SetVertexColor(C.red.r, C.red.g, C.red.b, 0.9)
+        else
+            row.addonDot:SetVertexColor(C.accent.r, C.accent.g, C.accent.b, 0.8)
+        end
     else
         row.addonDot:Hide()
     end
@@ -1318,6 +1324,9 @@ function ShowRowTooltip(row)
     if not data.hasAddonData then
         GameTooltip:AddLine(" ")
         GameTooltip:AddLine("Player does not have BRutus installed", C.red.r, C.red.g, C.red.b)
+    elseif data.addonVersion and data.addonVersion ~= BRutus.VERSION then
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine("BRutus v" .. data.addonVersion .. " (outdated)", C.red.r, C.red.g, C.red.b)
     end
 
     -- Wishlist info (native)

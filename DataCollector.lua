@@ -389,6 +389,7 @@ function DataCollector:GetBroadcastData()
         lastUpdate = myData.lastUpdate,
         professions = myData.professions,
         stats = myData.stats,
+        addonVersion = BRutus.VERSION,
     }
 
     -- Serialize gear with just essential info
