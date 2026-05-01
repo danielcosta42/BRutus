@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.37.0] - 2026-05-01
+
+### Added
+- Add complete function catalog and Lua best practices documentation
+
+
 ## [1.36.0] - 2026-04-27
 
 ### Added
