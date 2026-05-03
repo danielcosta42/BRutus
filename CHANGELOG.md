@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.38.0] - 2026-05-03
+
+### Added
+- enhance Loot Master and Roster Frame with conditional tab visibility and raid checks
+
+
 ## [1.37.1] - 2026-05-03
 
 ### Other
