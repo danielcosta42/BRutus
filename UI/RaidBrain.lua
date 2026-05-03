@@ -273,3 +273,8 @@ function RaidBrain:Toggle()
         self:Show()
     end
 end
+
+-- Returns true if the HUD frame is currently visible.
+function RaidBrain:IsHUDShown()
+    return _frame ~= nil and _frame:IsShown()
+end

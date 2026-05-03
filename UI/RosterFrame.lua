@@ -233,6 +233,7 @@ function BRutus.CreateRosterFrame()
     CreateTab("loot", "Loot", false)
     CreateTab("trials", "Trials", true)
     CreateTab("recruitment", "Recruitment", true)
+    CreateTab("raidleader", "Raid Leader", true)
     CreateTab("settings", "Settings", false)
 
     ----------------------------------------------------------------
@@ -468,6 +469,16 @@ function BRutus.CreateRosterFrame()
     trialsPanel:Hide()
     frame.tabPanels["trials"] = trialsPanel
     BRutus:CreateTrialsPanel(trialsPanel, frame)
+
+    ----------------------------------------------------------------
+    -- RAID LEADER PANEL (officer only)
+    ----------------------------------------------------------------
+    local raidLeaderPanel = CreateFrame("Frame", nil, frame)
+    raidLeaderPanel:SetPoint("TOPLEFT", 0, contentTop)
+    raidLeaderPanel:SetPoint("BOTTOMRIGHT", 0, 30)
+    raidLeaderPanel:Hide()
+    frame.tabPanels["raidleader"] = raidLeaderPanel
+    BRutus:CreateRaidLeaderPanel(raidLeaderPanel, frame)
 
     ----------------------------------------------------------------
     -- SETTINGS PANEL

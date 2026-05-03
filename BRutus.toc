@@ -55,3 +55,4 @@ UI\RosterFrame.lua
 UI\MemberDetail.lua
 UI\RaidHUD.lua
 UI\RaidBrain.lua
+UI\RaidLeaderPanel.lua
