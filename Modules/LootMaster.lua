@@ -133,8 +133,8 @@ end
 -- Shows the roll popup so all BRutus users can see priority info.
 ----------------------------------------------------------------------
 function LootMaster:OnStartLootRoll(rollID, rollTime)
-    -- Only show roll popup while in a raid.
-    if not IsInRaid() then return end
+    -- Only show the roll popup when in a group (party or raid), never solo.
+    if not IsInGroup() then return end
     local link = GetLootRollItemLink(rollID)
     if not link then return end
     local itemId = tonumber(link:match("item:(%d+)")) or 0
