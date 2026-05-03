@@ -42,8 +42,13 @@ Modules\TrialTracker.lua
 Modules\ConsumableChecker.lua
 Modules\SpecChecker.lua
 
+# Data
+Data\RaidAssignmentTemplates.lua
+
 # Services
 Services\AlertService.lua
+Services\AssignmentTemplateService.lua
+Services\AssignmentAutoFillService.lua
 Services\AssignmentService.lua
 Services\PrePullService.lua
 
@@ -54,5 +59,6 @@ UI\FeaturePanels.lua
 UI\RosterFrame.lua
 UI\MemberDetail.lua
 UI\RaidHUD.lua
+UI\AssignmentPreview.lua
 UI\RaidBrain.lua
 UI\RaidLeaderPanel.lua

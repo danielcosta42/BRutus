@@ -56,14 +56,22 @@ end
 ----------------------------------------------------------------------
 -- Create the Raid Leader panel (called once by RosterFrame).
 -- parent is the tab content frame, already positioned.
+-- All content goes into a scroll child so it never overflows.
 ----------------------------------------------------------------------
 function BRutus:CreateRaidLeaderPanel(parent, _mainFrame)
 
     -- Reset row cache in case this is called more than once (safety guard).
     wipe(_alertRows)
 
-    local LEFT = 20
-    local W    = 680     -- usable content width
+    -- Scroll frame fills the entire parent tab area.
+    local scrollFrame, p = UI:CreateScrollFrame(parent, "BRutusRaidLeaderScroll")
+    scrollFrame:SetAllPoints(parent)
+    -- Explicit content width: frame is 1080px, scrollbar ~20px, margins ~20px each.
+    local CONTENT_W = 1020
+    p:SetWidth(CONTENT_W)
+
+    local LEFT = 16
+    local W    = CONTENT_W - LEFT - 16   -- usable widget width
 
     -- Running vertical offset (negative = downward from TOPLEFT anchor).
     local yOff = -15
@@ -73,17 +81,17 @@ function BRutus:CreateRaidLeaderPanel(parent, _mainFrame)
     ------------------------------------------------------------------
 
     local function SectionHeader(text)
-        local t = UI:CreateTitle(parent, text, 13)
+        local t = UI:CreateTitle(p, text, 13)
         t:SetPoint("TOPLEFT", LEFT, yOff)
         yOff = yOff - 22
-        local sep = UI:CreateSeparator(parent)
+        local sep = UI:CreateSeparator(p)
         sep:SetPoint("TOPLEFT",  LEFT, yOff)
         sep:SetPoint("TOPRIGHT", -LEFT, yOff)
         yOff = yOff - 12
     end
 
     local function BodyText(text, r, g, b)
-        local t = UI:CreateText(parent, text, 10, r or C.silver.r, g or C.silver.g, b or C.silver.b)
+        local t = UI:CreateText(p, text, 10, r or C.silver.r, g or C.silver.g, b or C.silver.b)
         t:SetPoint("TOPLEFT", LEFT, yOff)
         t:SetWidth(W)
         yOff = yOff - 16
@@ -91,13 +99,13 @@ function BRutus:CreateRaidLeaderPanel(parent, _mainFrame)
     end
 
     local function RowLabel(text, xIndent)
-        local t = UI:CreateText(parent, text, 10, C.silver.r, C.silver.g, C.silver.b)
+        local t = UI:CreateText(p, text, 10, C.silver.r, C.silver.g, C.silver.b)
         t:SetPoint("TOPLEFT", LEFT + (xIndent or 0), yOff)
         return t
     end
 
     local function MakeEditBox(w, h)
-        local eb = CreateFrame("EditBox", nil, parent, "BackdropTemplate")
+        local eb = CreateFrame("EditBox", nil, p, "BackdropTemplate")
         eb:SetSize(w or 400, h or 22)
         eb:SetBackdrop({
             bgFile   = "Interface\\Buttons\\WHITE8x8",
@@ -127,10 +135,10 @@ function BRutus:CreateRaidLeaderPanel(parent, _mainFrame)
     BodyText("Floating overlay showing raid state, active alerts and next assignment actions.")
 
     local hudStatusLabel = RowLabel("HUD status: ")
-    local hudStatusText  = UI:CreateText(parent, "Hidden", 10, C.offline.r, C.offline.g, C.offline.b)
+    local hudStatusText  = UI:CreateText(p, "Hidden", 10, C.offline.r, C.offline.g, C.offline.b)
     hudStatusText:SetPoint("LEFT", hudStatusLabel, "RIGHT", 4, 0)
 
-    local hudToggleBtn = UI:CreateButton(parent, "Toggle HUD", 110, 22)
+    local hudToggleBtn = UI:CreateButton(p, "Toggle HUD", 110, 22)
     hudToggleBtn:SetPoint("LEFT", hudStatusText, "RIGHT", 20, 0)
 
     local function UpdateHUDStatus()
@@ -159,11 +167,11 @@ function BRutus:CreateRaidLeaderPanel(parent, _mainFrame)
     SectionHeader("Pre-Pull Validation")
     BodyText("Checks raid for dead players, offline players and missing consumables.")
 
-    local prePullText = UI:CreateText(parent, "|cffAAAAAA(not yet run)|r", 10, 1, 1, 1)
+    local prePullText = UI:CreateText(p, "|cffAAAAAA(not yet run)|r", 10, 1, 1, 1)
     prePullText:SetPoint("TOPLEFT", LEFT, yOff)
     prePullText:SetWidth(W - 130)
 
-    local runCheckBtn = UI:CreateButton(parent, "Run Check", 110, 22)
+    local runCheckBtn = UI:CreateButton(p, "Run Check", 110, 22)
     runCheckBtn:SetPoint("TOPLEFT", LEFT + W - 110, yOff - 2)
     runCheckBtn:SetScript("OnClick", function()
         if not BRutus.PrePullService then return end
@@ -193,7 +201,7 @@ function BRutus:CreateRaidLeaderPanel(parent, _mainFrame)
     SectionHeader("Active Alerts")
 
     -- Action buttons on the same line
-    local clearAlertsBtn = UI:CreateButton(parent, "Clear All", 90, 22)
+    local clearAlertsBtn = UI:CreateButton(p, "Clear All", 90, 22)
     clearAlertsBtn:SetPoint("TOPLEFT", LEFT, yOff - 2)
     clearAlertsBtn:SetScript("OnClick", function()
         if BRutus.AlertService then
@@ -202,7 +210,7 @@ function BRutus:CreateRaidLeaderPanel(parent, _mainFrame)
         -- RefreshAlertRows called via ALERT_UPDATED event (no need to call again)
     end)
 
-    local testAlertBtn = UI:CreateButton(parent, "Test Alert", 90, 22)
+    local testAlertBtn = UI:CreateButton(p, "Test Alert", 90, 22)
     testAlertBtn:SetPoint("LEFT", clearAlertsBtn, "RIGHT", 6, 0)
     testAlertBtn:SetScript("OnClick", function()
         if BRutus.AlertService then
@@ -214,7 +222,7 @@ function BRutus:CreateRaidLeaderPanel(parent, _mainFrame)
 
     -- 3 pre-built alert rows
     for i = 1, 3 do
-        local row = UI:CreateText(parent, "", 10, 1, 1, 1)
+        local row = UI:CreateText(p, "", 10, 1, 1, 1)
         row:SetPoint("TOPLEFT", LEFT + 8, yOff)
         row:SetWidth(W - 8)
         _alertRows[i] = row
@@ -271,7 +279,7 @@ function BRutus:CreateRaidLeaderPanel(parent, _mainFrame)
 
     Spacer(4)
 
-    local saveBtn = UI:CreateButton(parent, "Save Assignments", 150, 24)
+    local saveBtn = UI:CreateButton(p, "Save Assignments", 150, 24)
     saveBtn:SetPoint("TOPLEFT", LEFT, yOff - 2)
     saveBtn:SetScript("OnClick", function()
         if not BRutus.AssignmentService then return end
@@ -312,9 +320,106 @@ function BRutus:CreateRaidLeaderPanel(parent, _mainFrame)
     -- SECTION 5: Slash Command Reference
     ------------------------------------------------------------------
     SectionHeader("Commands")
-    BodyText("/brutus brain     — toggle Raid Brain HUD")
-    BodyText("/brutus ready     — run pre-pull validation check")
-    BodyText("/brutus cons      — run consumable check on raid")
+    BodyText("/brutus brain                  — toggle Raid Brain HUD")
+    BodyText("/brutus ready                  — run pre-pull validation check")
+    BodyText("/brutus cons                   — run consumable check on raid")
+    BodyText("/brutus assign ssc [boss]      — generate SSC assignments")
+    BodyText("/brutus assign tk  [boss]      — generate TK assignments")
+    BodyText("/brutus assign preview         — re-open last preview")
+
+    Spacer(8)
+
+    ------------------------------------------------------------------
+    -- SECTION 6: Assignment Templates
+    ------------------------------------------------------------------
+    SectionHeader("Assignment Templates")
+    BodyText("Auto-fill assignments from SSC/TK templates using the current roster (or db members if not in raid).")
+
+    -- Quick generate: full raid
+    BodyText("Full Raid:", C.gold.r, C.gold.g, C.gold.b)
+
+    local genSSCBtn = UI:CreateButton(p, "Generate SSC", 130, 22)
+    genSSCBtn:SetPoint("TOPLEFT", LEFT, yOff - 2)
+    genSSCBtn:SetScript("OnClick", function()
+        if not BRutus.AssignmentAutoFillService then return end
+        local results = BRutus.AssignmentAutoFillService:GenerateForRaid("SSC")
+        if results[1] then BRutus:ShowAssignmentPreview(results[1]) end
+        BRutus:Print(format("[Assign] SSC: %d bosses generated.", #results))
+    end)
+
+    local genTKBtn = UI:CreateButton(p, "Generate TK", 130, 22)
+    genTKBtn:SetPoint("LEFT", genSSCBtn, "RIGHT", 6, 0)
+    genTKBtn:SetScript("OnClick", function()
+        if not BRutus.AssignmentAutoFillService then return end
+        local results = BRutus.AssignmentAutoFillService:GenerateForRaid("TK")
+        if results[1] then BRutus:ShowAssignmentPreview(results[1]) end
+        BRutus:Print(format("[Assign] TK: %d bosses generated.", #results))
+    end)
+
+    yOff = yOff - 30
+    Spacer(6)
+
+    -- Per-boss buttons helper
+    local BTN_W   = 108
+    local BTN_GAP = 4
+    local BTN_PER = 4  -- buttons per row
+
+    local function BossBtnRow(raidId, bossKey, bossLabel, col, rowOffset)
+        local btn = UI:CreateButton(p, bossLabel, BTN_W, 22)
+        btn:SetPoint("TOPLEFT", LEFT + col * (BTN_W + BTN_GAP), yOff - rowOffset * 28 - 2)
+        btn:SetScript("OnClick", function()
+            if not BRutus.AssignmentAutoFillService then return end
+            local res, err = BRutus.AssignmentAutoFillService:GenerateForBoss(raidId, bossKey)
+            if res then
+                BRutus:ShowAssignmentPreview(res)
+                BRutus:Print(format("[Assign] %s/%s — Conf: %s  Missing: %d",
+                    raidId, res.bossName, res.confidence, #res.missing))
+            else
+                BRutus:Print("|cffFF4444[Assign] " .. (err or "?") .. "|r")
+            end
+        end)
+    end
+
+    -- SSC per-boss buttons
+    BodyText("SSC Bosses:", C.gold.r, C.gold.g, C.gold.b)
+
+    local sscBosses = {
+        { id = "hydross",    label = "Hydross"    },
+        { id = "lurker",     label = "Lurker"     },
+        { id = "leotheras",  label = "Leotheras"  },
+        { id = "karathress", label = "Karathress" },
+        { id = "morogrim",   label = "Morogrim"   },
+        { id = "vashj",      label = "Lady Vashj" },
+    }
+    for i, boss in ipairs(sscBosses) do
+        local col    = (i - 1) % BTN_PER
+        local rowOff = math.floor((i - 1) / BTN_PER)
+        BossBtnRow("SSC", boss.id, boss.label, col, rowOff)
+    end
+    yOff = yOff - math.ceil(#sscBosses / BTN_PER) * 28 - 2
+
+    Spacer(6)
+
+    -- TK per-boss buttons
+    BodyText("TK Bosses:", C.gold.r, C.gold.g, C.gold.b)
+
+    local tkBosses = {
+        { id = "alar",       label = "Al'ar"      },
+        { id = "voidreaver", label = "Void Reaver" },
+        { id = "solarian",   label = "Solarian"   },
+        { id = "kael",       label = "Kael'thas"  },
+    }
+    for i, boss in ipairs(tkBosses) do
+        local col    = (i - 1) % BTN_PER
+        local rowOff = math.floor((i - 1) / BTN_PER)
+        BossBtnRow("TK", boss.id, boss.label, col, rowOff)
+    end
+    yOff = yOff - math.ceil(#tkBosses / BTN_PER) * 28 - 2
+
+    Spacer(8)
+
+    -- Finalize scroll child height so the scroll range is correct.
+    p:SetHeight(math.abs(yOff) + 30)
 
     ------------------------------------------------------------------
     -- OnShow / OnHide: subscribe to events while panel is active

@@ -173,6 +173,66 @@ SlashCmdList["BRUTUS"] = function(msg)
                 end
             end
         end
+    elseif msg:match("^assign") then
+        -- /brutus assign <ssc|tk> [bossId]
+        -- /brutus assign preview  — re-show last preview
+        -- /brutus assign clear    — close preview
+        if not BRutus:IsOfficer() then
+            BRutus:Print("|cffFF4444Raid assignments are officer-only.|r")
+            return
+        end
+        local rest = strtrim(msg:gsub("^assign%s*", ""))
+        local args = {}
+        for word in rest:gmatch("%S+") do
+            tinsert(args, word)
+        end
+        local sub = (args[1] or ""):lower()
+        if sub == "" then
+            BRutus:Print("Usage: /brutus assign <ssc|tk> [bossId]")
+            BRutus:Print("       /brutus assign preview")
+            BRutus:Print("       /brutus assign clear")
+        elseif sub == "preview" then
+            if BRutus.ShowAssignmentPreview then
+                BRutus:ShowAssignmentPreview(nil)
+            end
+        elseif sub == "clear" then
+            if BRutus.HideAssignmentPreview then
+                BRutus:HideAssignmentPreview()
+            end
+        elseif sub == "ssc" or sub == "tk" then
+            if not BRutus.AssignmentAutoFillService then
+                BRutus:Print("AssignmentAutoFillService not available.")
+                return
+            end
+            local raidId = sub:upper()
+            local bossId = args[2] and args[2]:lower()
+            if bossId then
+                local res, err = BRutus.AssignmentAutoFillService:GenerateForBoss(raidId, bossId)
+                if res then
+                    BRutus:Print(format("[Assign] %s / %s — Confidence: %s  Missing: %d",
+                        raidId, res.bossName, res.confidence, #res.missing))
+                    BRutus:ShowAssignmentPreview(res)
+                else
+                    BRutus:Print("|cffFF4444[Assign] " .. (err or "Unknown error") .. "|r")
+                end
+            else
+                local results = BRutus.AssignmentAutoFillService:GenerateForRaid(raidId)
+                if #results == 0 then
+                    BRutus:Print("|cffFF4444[Assign] No templates found for " .. raidId .. ".|r")
+                    return
+                end
+                local totalMissing, lowCount = 0, 0
+                for _, r in ipairs(results) do
+                    totalMissing = totalMissing + #r.missing
+                    if r.confidence == "LOW" then lowCount = lowCount + 1 end
+                end
+                BRutus:Print(format("[Assign] %s — %d bosses. Missing slots: %d. Low confidence: %d",
+                    raidId, #results, totalMissing, lowCount))
+                BRutus:ShowAssignmentPreview(results[1])
+            end
+        else
+            BRutus:Print("|cffFF4444[Assign] Unknown raid: '" .. sub .. "'. Use: ssc | tk|r")
+        end
     elseif msg == "attune dumpquests" then
         -- Dumps all completed quest IDs in the TBC attunement range.
         -- Covers T4/T5/T6 + some headroom for anniversary-specific hidden flags.

@@ -47,3 +47,26 @@ function AssignmentService:GetRoles(encounterId)
     if not rec then return {} end
     return rec.roles or {}
 end
+
+-- Build a payload table suitable for future sync transmission.
+-- source: "local" | "sync" | "manual" | "generated"
+-- Never mutates state — caller stores or sends the returned table.
+function AssignmentService:BuildSyncPayload(encounterId, raidId, bossId)
+    local assignment = _assignments[encounterId]
+    if not assignment then return nil end
+    return {
+        assignmentId    = (raidId or "?") .. "_" .. (bossId or encounterId or "?"),
+        raidId          = raidId,
+        bossId          = bossId or encounterId,
+        version         = 1,
+        createdAt       = GetServerTime(),
+        createdBy       = UnitName("player") or "Unknown",
+        updatedAt       = GetServerTime(),
+        updatedBy       = UnitName("player") or "Unknown",
+        slots           = assignment.slots,
+        actions         = assignment.actions,
+        roles           = assignment.roles,
+        manualOverrides = {},
+        source          = assignment.source or "local",
+    }
+end
