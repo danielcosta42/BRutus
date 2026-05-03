@@ -140,7 +140,7 @@ function BRutus.CreateRosterFrame()
     -- Content area starts below tab bar
     local contentTop = -(44 + 2 + TAB_HEIGHT)
 
-    local function CreateTab(key, label, officerOnly)
+    local function CreateTab(key, label, officerOnly, condition)
         local idx = #frame.tabs + 1
         local tab = CreateFrame("Button", nil, tabBar, "BackdropTemplate")
         tab:SetSize(100, TAB_HEIGHT)
@@ -162,6 +162,7 @@ function BRutus.CreateRosterFrame()
         tab.label = tabLabel
         tab.key = key
         tab.officerOnly = officerOnly
+        tab.condition   = condition  -- optional function() → bool; overrides officerOnly when present
 
         tab:SetScript("OnClick", function()
             frame:SetActiveTab(key)
@@ -205,7 +206,9 @@ function BRutus.CreateRosterFrame()
         local prevTab = nil
         for _, tab in ipairs(self.tabs) do
             local visible = true
-            if tab.officerOnly then
+            if tab.condition then
+                visible = tab.condition()
+            elseif tab.officerOnly then
                 visible = BRutus:IsOfficer()
             end
             if visible then
@@ -218,8 +221,16 @@ function BRutus.CreateRosterFrame()
                 tab:Show()
                 prevTab = tab
             else
+                -- If this was the active tab, clear active so we can fall back.
+                if self.activeTab == tab.key then
+                    self.activeTab = nil
+                end
                 tab:Hide()
             end
+        end
+        -- Fall back to roster if the previously active tab is now hidden.
+        if not self.activeTab then
+            self:SetActiveTab("roster")
         end
     end
 
@@ -230,7 +241,10 @@ function BRutus.CreateRosterFrame()
         CreateTab("wishlist", "Lista de Desejos", false)
     end
     CreateTab("raids", "Raids", false)
-    CreateTab("loot", "Loot", false)
+    CreateTab("loot", "Loot Master", false, function()
+        -- Visible only while the player is in a raid as master looter.
+        return IsInRaid() and BRutus.LootMaster and BRutus.LootMaster:IsMasterLooter()
+    end)
     CreateTab("trials", "Trials", true)
     CreateTab("recruitment", "Recruitment", true)
     CreateTab("settings", "Settings", false)
@@ -758,6 +772,14 @@ function BRutus.CreateRosterFrame()
 
     -- ESC to close
     table.insert(UISpecialFrames, "BRutusRosterFrame")
+
+    -- Re-evaluate conditional tabs when group or loot method changes.
+    frame:RegisterEvent("GROUP_ROSTER_UPDATE")
+    frame:RegisterEvent("RAID_ROSTER_UPDATE")
+    frame:RegisterEvent("PARTY_LOOT_METHOD_CHANGED")
+    frame:SetScript("OnEvent", function(self)
+        self:UpdateTabVisibility()
+    end)
 
     -- Initialize tab system
     frame:UpdateTabVisibility()

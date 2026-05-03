@@ -306,6 +306,8 @@ end
 -- Loot window events
 ----------------------------------------------------------------------
 function LootMaster:OnLootOpened()
+    -- ML distribution is only meaningful in a raid.
+    if not IsInRaid() and not self.testMode then return end
     if not self:IsMasterLooter() then return end
 
     self.isMLSession = true
