@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.37.1] - 2026-05-03
+
+### Other
+- Add Spec Checker, Trial Tracker, and Wishlist System modules
+
+
 ## [1.37.0] - 2026-05-01
 
 ### Added
