@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.39.0] - 2026-05-03
+
+### Added
+- update Loot tab visibility to always show for officers
+
+
 ## [1.38.0] - 2026-05-03
 
 ### Added
