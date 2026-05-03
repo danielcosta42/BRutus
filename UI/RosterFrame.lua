@@ -241,10 +241,7 @@ function BRutus.CreateRosterFrame()
         CreateTab("wishlist", "Lista de Desejos", false)
     end
     CreateTab("raids", "Raids", false)
-    CreateTab("loot", "Loot Master", false, function()
-        -- Visible only while the player is in a raid as master looter.
-        return IsInRaid() and BRutus.LootMaster and BRutus.LootMaster:IsMasterLooter()
-    end)
+    CreateTab("loot", "Loot", true)  -- officers always see loot history; items recorded only via ML
     CreateTab("trials", "Trials", true)
     CreateTab("recruitment", "Recruitment", true)
     CreateTab("settings", "Settings", false)
