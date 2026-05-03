@@ -133,6 +133,8 @@ end
 -- Shows the roll popup so all BRutus users can see priority info.
 ----------------------------------------------------------------------
 function LootMaster:OnStartLootRoll(rollID, rollTime)
+    -- Only show roll popup while in a raid.
+    if not IsInRaid() then return end
     local link = GetLootRollItemLink(rollID)
     if not link then return end
     local itemId = tonumber(link:match("item:(%d+)")) or 0
@@ -2904,6 +2906,10 @@ end
 -- there is no ML loot window for bag items.
 ----------------------------------------------------------------------
 function LootMaster:RollFromBag(bag, slot)
+    if not IsInRaid() and not self.testMode then
+        BRutus:Print("|cffFF4444[LootMaster]|r Apenas disponível em raid.")
+        return
+    end
     if not self:IsMasterLooter() then
         BRutus:Print("|cffFF4444[LootMaster]|r Apenas o Master Looter pode usar esta função.")
         return
