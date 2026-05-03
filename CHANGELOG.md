@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.40.0] - 2026-05-03
+
+### Added
+- restrict roll popup and bag roll functionality to raid only
+
+
 ## [1.39.0] - 2026-05-03
 
 ### Added
