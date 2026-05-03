@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.41.0] - 2026-05-03
+
+### Added
+- update roll popup visibility to show in groups instead of just raids
+
+
 ## [1.40.0] - 2026-05-03
 
 ### Added
