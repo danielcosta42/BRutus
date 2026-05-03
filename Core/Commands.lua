@@ -118,6 +118,18 @@ SlashCmdList["BRUTUS"] = function(msg)
                 BRutus:Print("|cffAAAAAA[BRutus] No duplicates found.|r")
             end
         end
+    elseif msg == "ready" then
+        -- /brutus ready — run pre-pull validation check
+        if BRutus.PrePullService then
+            BRutus.PrePullService:RunCheck()
+        else
+            BRutus:Print("PrePullService not available.")
+        end
+    elseif msg == "brain" then
+        -- /brutus brain — toggle Raid Brain HUD
+        if BRutus.RaidBrain then
+            BRutus.RaidBrain:Toggle()
+        end
     elseif msg == "specs" then
         if BRutus.SpecChecker then
             BRutus.SpecChecker:ScanGroup()

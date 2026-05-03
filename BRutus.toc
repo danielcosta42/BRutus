@@ -24,6 +24,7 @@ Core\Core.lua
 Core\Compat.lua
 Core\Data.lua
 Core\Utils.lua
+Core\Events.lua
 Core\Commands.lua
 
 # Data Modules
@@ -41,6 +42,11 @@ Modules\TrialTracker.lua
 Modules\ConsumableChecker.lua
 Modules\SpecChecker.lua
 
+# Services
+Services\AlertService.lua
+Services\AssignmentService.lua
+Services\PrePullService.lua
+
 # UI
 UI\Helpers.lua
 UI\RecipesPanel.lua
@@ -48,3 +54,4 @@ UI\FeaturePanels.lua
 UI\RosterFrame.lua
 UI\MemberDetail.lua
 UI\RaidHUD.lua
+UI\RaidBrain.lua
