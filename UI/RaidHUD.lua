@@ -131,7 +131,6 @@ local _consPopup         = nil
 local _collapsed         = false
 local _lastTick          = 0
 local _hudManuallyClosed  = false
-local _consManuallyClosed = false
 
 ----------------------------------------------------------------------
 -- LAYOUT CONSTANTS
@@ -470,8 +469,7 @@ function BRutus:UpdateRaidHUDVisibility()
         end
     else
         -- Reset dismissed flags when leaving raid so windows reappear on next raid
-        _hudManuallyClosed  = false
-        _consManuallyClosed = false
+        _hudManuallyClosed = false
         _hudFrame:Hide()
         if _consPopup then _consPopup:Hide() end
     end
@@ -487,9 +485,8 @@ _evtFrame:RegisterEvent("RAID_ROSTER_UPDATE")
 
 _evtFrame:SetScript("OnEvent", function(_, event)
     if event == "PLAYER_ENTERING_WORLD" then
-        -- Reset dismissed flags on login/reload so windows show fresh
-        _hudManuallyClosed  = false
-        _consManuallyClosed = false
+        -- Reset dismissed flag on login/reload so window shows fresh
+        _hudManuallyClosed = false
         -- Wait for BRutus.db to be ready (set in ADDON_LOADED)
         C_Timer.After(2, function()
             if BRutus.db then
@@ -679,7 +676,6 @@ local function BuildConsPopup(f)
 end
 
 function BRutus:ShowConsumablePopup()
-    if _consManuallyClosed then return end
     local CC = BRutus.ConsumableChecker
     if CC then CC:CheckRaid() end
 
@@ -732,7 +728,6 @@ function BRutus:ShowConsumablePopup()
     hCloseTxt:SetTextColor(0.85, 0.20, 0.20)
     hCloseTxt:SetText("×")
     hClose:SetScript("OnClick", function()
-        _consManuallyClosed = true
         f:Hide()
     end)
 

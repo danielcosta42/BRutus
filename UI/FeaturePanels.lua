@@ -1473,6 +1473,27 @@ function BRutus:RefreshSettingsPanel(content)
     testRTDesc:SetPoint("LEFT", testRT, "RIGHT", 10, 0)
     yOff = yOff + 32
 
+    -- Test: ML Loot Frame
+    local testLootFrame = UI:CreateButton(content, "Test Loot Frame", 200, 26)
+    testLootFrame:SetPoint("TOPLEFT", 8, -yOff)
+    testLootFrame:SetScript("OnClick", function()
+        if BRutus.LootMaster then
+            BRutus.LootMaster.testMode = true
+            local fakeItems = {
+                { slot = 1, link = "|cffa335ee|Hitem:30110::::::::70:::::|h[Tsunami Talisman]|h|r",   name = "Tsunami Talisman",    quality = 4 },
+                { slot = 2, link = "|cffff8000|Hitem:32837::::::::70:::::|h[Warglaive of Azzinoth]|h|r", name = "Warglaive of Azzinoth", quality = 5 },
+                { slot = 3, link = "|cffa335ee|Hitem:30019::::::::70:::::|h[Ring of Endless Coils]|h|r", name = "Ring of Endless Coils", quality = 4 },
+            }
+            BRutus.LootMaster:ShowLootFrame(fakeItems)
+            BRutus:Print("Test loot frame shown with 3 sample items.")
+        else
+            BRutus:Print("|cffFF4444Loot Master module is disabled.|r")
+        end
+    end)
+    local testLFDesc = UI:CreateText(content, "Opens the ML loot frame with sample items", 9, C.silver.r, C.silver.g, C.silver.b)
+    testLFDesc:SetPoint("LEFT", testLootFrame, "RIGHT", 10, 0)
+    yOff = yOff + 32
+
     -- Test: Export Attendance
     local testExport = UI:CreateButton(content, "Test Attendance Export", 200, 26)
     testExport:SetPoint("TOPLEFT", 8, -yOff)

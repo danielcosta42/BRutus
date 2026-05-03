@@ -20,22 +20,26 @@ Libs\LibDeflate.lua
 Libs\ChatThrottleLib.lua
 
 # Core
-Core.lua
+Core\Core.lua
+Core\Compat.lua
+Core\Data.lua
+Core\Utils.lua
+Core\Commands.lua
 
 # Data Modules
-DataCollector.lua
-AttunementTracker.lua
-CommSystem.lua
-RecruitmentSystem.lua
-WishlistSystem.lua
-RaidTracker.lua
-LootTracker.lua
-LootMaster.lua
-RecipeTracker.lua
-OfficerNotes.lua
-TrialTracker.lua
-ConsumableChecker.lua
-SpecChecker.lua
+Modules\DataCollector.lua
+Modules\AttunementTracker.lua
+Modules\CommSystem.lua
+Modules\RecruitmentSystem.lua
+Modules\WishlistSystem.lua
+Modules\RaidTracker.lua
+Modules\LootTracker.lua
+Modules\LootMaster.lua
+Modules\RecipeTracker.lua
+Modules\OfficerNotes.lua
+Modules\TrialTracker.lua
+Modules\ConsumableChecker.lua
+Modules\SpecChecker.lua
 
 # UI
 UI\Helpers.lua

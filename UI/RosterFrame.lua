@@ -499,12 +499,10 @@ function BRutus.CreateRosterFrame()
     local helpText = UI:CreateText(bottomBar, "/brutus scan  |  /brutus sync  |  /brutus wish", 9, 0.4, 0.4, 0.5)
     helpText:SetPoint("LEFT", 12, 0)
 
-    -- "Minha Wishlist" quick-access button (officer-only while in testing)
-    if BRutus:IsOfficer() then
-        local wishBtn = UI:CreateButton(bottomBar, "Minha Wishlist", 120, 22)
-        wishBtn:SetPoint("LEFT", helpText, "RIGHT", 16, 0)
-        wishBtn:SetScript("OnClick", function() BRutus:ShowWishlistFrame() end)
-    end
+    -- "Minha Wishlist" quick-access button (all members)
+    local wishBtn = UI:CreateButton(bottomBar, "Minha Wishlist", 120, 22)
+    wishBtn:SetPoint("LEFT", helpText, "RIGHT", 16, 0)
+    wishBtn:SetScript("OnClick", function() BRutus:ShowWishlistFrame() end)
 
     -- Guild Invite (visible only if player can invite)
     local inviteBox = CreateFrame("EditBox", nil, bottomBar, "BackdropTemplate")

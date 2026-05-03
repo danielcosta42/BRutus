@@ -166,6 +166,7 @@ read_globals = {
     "GetNumGroupMembers",
     "IsInGroup",
     "IsInRaid",
+    "UnitIsGroupLeader",
     "GetRaidRosterInfo",
     "CombatLogGetCurrentEventInfo",
 
@@ -177,6 +178,7 @@ read_globals = {
     "GetLootSlotLink",
     "GiveMasterLoot",
     "GetMasterLootCandidate",
+    "GetLootRollItemLink",  -- native group loot roll API
     "RandomRoll",           -- /roll command API
     "RANDOM_ROLL_RESULT",   -- localized roll result string (for pattern building)
 
@@ -184,7 +186,9 @@ read_globals = {
     "C_Container",
     "GetContainerNumSlots",
     "GetContainerItemInfo",
+    "GetContainerItemLink",                        -- legacy bag item link API
     "UseContainerItem",
+    "ContainerFrameItemButton_OnModifiedClick",    -- bag button modifier-click handler
     "GetUnitName",
     "TradeFrameRecipientNameText",
 

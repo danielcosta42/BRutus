@@ -46,13 +46,22 @@ ConsumableChecker.CONSUMABLES = {
     weaponBuff = {
         label = "Weapon Buff",
         buffs = {
+            -- Wizard Oils
             [25123] = "Brilliant Wizard Oil",
             [25122] = "Superior Wizard Oil",
             [28898] = "Blessed Wizard Oil",
+            -- Mana Oils
+            [25120] = "Brilliant Mana Oil",
             [28891] = "Superior Mana Oil",
-            [34004] = "Adamantite Weightstone",
-            [34003] = "Adamantite Sharpening Stone",
+            [28892] = "Blessed Mana Oil",
+            -- Weapon Coatings
             [28893] = "Blessed Weapon Coating",
+            -- Sharpening Stones & Weightstones (apply player aura in TBC)
+            [34003] = "Adamantite Sharpening Stone",
+            [34004] = "Adamantite Weightstone",
+            [22746] = "Elemental Sharpening Stone",
+            [23552] = "Dense Sharpening Stone",
+            [23557] = "Dense Weightstone",
         },
     },
     battleElixir = {
@@ -159,18 +168,23 @@ function ConsumableChecker:CheckRaid()
     return results
 end
 
-function ConsumableChecker:UnitHasBuff(unit, spellID, nameHint)
+function ConsumableChecker:UnitHasBuff(unit, spellID, _nameHint)
+    -- Pre-resolve the localized spell name from the client so the match
+    -- works on any locale (PT-BR, EN-US, etc.) without hardcoded strings.
+    local localizedName = GetSpellInfo and GetSpellInfo(spellID) or nil
+
     for i = 1, 40 do
-        -- TBC UnitBuff: name, rank, icon, count, debuffType, duration,
-        -- expirationTime, caster, isStealable, shouldConsolidate, spellId
-        local name, _, _, _, _, _, _, _, _, idA, idB = UnitBuff(unit, i)
+        -- TBC Anniversary UnitBuff returns (pos 10 = spellId):
+        --   name, icon, count, debuffType, duration, expirationTime,
+        --   source, isStealable, nameplateShowPersonal, spellId, ...
+        local name, _, _, _, _, _, _, _, _, auraId = UnitBuff(unit, i)
         if not name then break end
-        -- Try spellId at both position 10 and 11 (varies by client build)
-        if idA == spellID or idB == spellID then
+        -- Primary check: spell ID match (locale-independent)
+        if auraId == spellID then
             return name
         end
-        -- Fallback: name match (English locale, exact match)
-        if nameHint and name == nameHint then
+        -- Secondary: match by localized name from GetSpellInfo
+        if localizedName and name == localizedName then
             return name
         end
     end

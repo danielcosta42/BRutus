@@ -23,7 +23,7 @@ LootMaster.awardHistory      = {}     -- recent awards for undo
 LootMaster.pendingTrades     = {}     -- items awaiting trade: [itemId] = { player, link, itemId, timestamp }
 LootMaster.testMode          = false  -- when true, bypasses raid/ML checks for local testing
 LootMaster.rollPattern       = nil    -- built in Initialize() from RANDOM_ROLL_RESULT
-LootMaster.disenchanter      = ""     -- per-raid only; cleared on group leave (not saved to DB)
+LootMaster.disenchanter      = ""     -- runtime cache; persisted to BRutus.db.lootMaster.disenchanter
 
 -- Config defaults
 LootMaster.ROLL_DURATION = 30     -- seconds to wait for rolls
@@ -71,6 +71,8 @@ function LootMaster:Initialize()
     if lmdb.attTiebreaker    == nil then lmdb.attTiebreaker    = true end
     if lmdb.recvPenalty      == nil then lmdb.recvPenalty      = true end
     if lmdb.awardHistory     == nil then lmdb.awardHistory     = {}   end
+    if lmdb.disenchanter     == nil then lmdb.disenchanter     = ""  end
+    self.disenchanter = lmdb.disenchanter
 
     -- Build /roll detection pattern from localized RANDOM_ROLL_RESULT global
     -- e.g. EN: "%s rolls %d (%d-%d)."  → ^(.+) rolls (%d+) %((%d+)%-(%d+)%)%.$
@@ -88,7 +90,8 @@ function LootMaster:Initialize()
     frame:RegisterEvent("CHAT_MSG_SYSTEM")  -- capture /roll results
     frame:RegisterEvent("TRADE_SHOW")
     frame:RegisterEvent("TRADE_ACCEPT_UPDATE")
-    frame:RegisterEvent("GROUP_LEFT")       -- clear disenchanter when raid ends
+    -- GROUP_LEFT: disenchanter is now persisted to DB, no need to clear
+    frame:RegisterEvent("START_LOOT_ROLL")  -- native WoW group loot rolls
     frame:SetScript("OnEvent", function(_, event, ...)
         if event == "LOOT_OPENED" then
             LootMaster:OnLootOpened()
@@ -102,13 +105,38 @@ function LootMaster:Initialize()
             LootMaster:OnTradeShow()
         elseif event == "TRADE_ACCEPT_UPDATE" then
             LootMaster:OnTradeAcceptUpdate(...)
-        elseif event == "GROUP_LEFT" then
-            LootMaster.disenchanter = ""
+        elseif event == "START_LOOT_ROLL" then
+            LootMaster:OnStartLootRoll(...)
         end
     end)
 
     C_ChatInfo.RegisterAddonMessagePrefix("BRutusLM")
     self.eventFrame = frame
+
+    -- Alt+Click on any bag item starts a BRutus roll for that item (ML only).
+    -- Uses the trade-delivery path since there is no ML loot window for bag items.
+    -- Guard: only hook if the default UI function exists (TBC Anniversary).
+    if ContainerFrameItemButton_OnModifiedClick then
+        hooksecurefunc("ContainerFrameItemButton_OnModifiedClick", function(btn, _button)
+            if not IsAltKeyDown() then return end
+            if not LootMaster:IsMasterLooter() then return end
+            local bagId  = btn:GetParent():GetID()
+            local slotId = btn:GetID()
+            LootMaster:RollFromBag(bagId, slotId)
+        end)
+    end
+end
+
+----------------------------------------------------------------------
+-- Handle native WoW group loot roll (START_LOOT_ROLL event).
+-- Fires for every group member when the game starts a native roll.
+-- Shows the roll popup so all BRutus users can see priority info.
+----------------------------------------------------------------------
+function LootMaster:OnStartLootRoll(rollID, rollTime)
+    local link = GetLootRollItemLink(rollID)
+    if not link then return end
+    local itemId = tonumber(link:match("item:(%d+)")) or 0
+    self:ShowRollPopup(link, rollTime or self.ROLL_DURATION, itemId)
 end
 
 ----------------------------------------------------------------------
@@ -179,16 +207,24 @@ function LootMaster:IsMasterLooter()
         end
     end
 
-    -- 4. Fallback: only the raid LEADER counts as ML (assistants cannot start rolls)
+    -- 4. Fallback: raid leader (assistants cannot start rolls)
     if IsInRaid() then
         local myName = UnitName("player")
         for i = 1, GetNumGroupMembers() do
             local name, rank = GetRaidRosterInfo(i)
             if name and name == myName then
-                return rank == 2 -- leader only; assistants (rank 1) are NOT allowed
+                return rank == 2
             end
         end
     end
+
+    -- 5. Party leader in a 5-man group
+    if IsInGroup() and not IsInRaid() then
+        if UnitIsGroupLeader("player") then return true end
+    end
+
+    -- 6. Solo: no group at all — player controls their own loot
+    if not IsInGroup() then return true end
 
     return false
 end
@@ -271,24 +307,31 @@ end
 ----------------------------------------------------------------------
 function LootMaster:OnLootOpened()
     if not self:IsMasterLooter() then return end
-    if not IsInRaid() and not self.testMode then return end
 
     self.isMLSession = true
     self.lootWindowOpen = true
 
-    -- Collect lootable items (Rare+)
+    -- Collect Rare+ and BoE items (BoE regardless of quality)
     local numItems = GetNumLootItems()
     local items = {}
     for i = 1, numItems do
-        local _, itemName, _, quality = GetLootSlotInfo(i)  -- TBC: icon, name, count, quality, locked
-        if quality and quality >= 3 then
-            local link = GetLootSlotLink(i)
-            if link then
+        local _, itemName, _, _, quality = GetLootSlotInfo(i)  -- BCC Anniversary: icon, name, count, currencyID, quality, locked, ...
+        local link = GetLootSlotLink(i)
+        if link then
+            local q = quality or 1
+            local isRarePlus = q >= 3
+            local isBoE = false
+            local itemId = tonumber(link:match("item:(%d+)"))
+            if itemId then
+                local bindType = select(14, GetItemInfo(itemId))
+                isBoE = bindType == 2
+            end
+            if isRarePlus or isBoE then
                 table.insert(items, {
-                    slot = i,
-                    link = link,
-                    name = itemName,
-                    quality = quality,
+                    slot    = i,
+                    link    = link,
+                    name    = itemName,
+                    quality = q,
                 })
             end
         end
@@ -302,6 +345,14 @@ end
 function LootMaster:OnLootClosed()
     self.isMLSession = false
     self.lootWindowOpen = false
+
+    -- If there is a pending loot session (roll in progress or ended but not yet
+    -- awarded), warn the ML and keep activeLoot intact so Award/DE still work
+    -- via the trade path (lootWindowOpen=false → QueueForTrade).
+    if self.activeLoot and not self.activeLoot.delivered then
+        BRutus:Print("|cffFF9900[LootMaster]|r Janela de loot fechada antes da entrega — "
+            .. "use o frame de roll para entregar o item via trade.")
+    end
 end
 
 ----------------------------------------------------------------------
@@ -477,17 +528,17 @@ end
 ----------------------------------------------------------------------
 function LootMaster:DoNormalAnnounce(itemLink, _lootSlot, itemId, topEntry, prioEntry)
     -- Main announce
-    local msg = format("{rt4} ROLL: %s {rt4}  |  /roll 1-100 = MS  |  /roll 1-99 = OS  |  %ds",
+    local msg = format("[ROLL] %s  -  /roll 1-100 = MS  -  /roll 1-99 = OS  -  %ds",
         itemLink, self.ROLL_DURATION)
     self:SafeSendChat(msg, "RAID_WARNING")
 
     -- Post priority info note
     if prioEntry then
-        local infoMsg = format("[Prio Oficial] Prioridade: %s (prio #1) — roll aberto para todos",
+        local infoMsg = format("[Prioridade] %s tem prio oficial #1 - roll aberto para todos",
             prioEntry.name)
         self:SafeSendChat(infoMsg, "RAID")
     elseif topEntry then
-        local infoMsg = format("[Wishlist] Prioridade: %s (#%d) — roll aberto para todos",
+        local infoMsg = format("[Prioridade] %s (#%d na wishlist) - roll aberto para todos",
             topEntry.name, topEntry.order)
         self:SafeSendChat(infoMsg, "RAID")
     end
@@ -504,11 +555,10 @@ function LootMaster:DoNormalAnnounce(itemLink, _lootSlot, itemId, topEntry, prio
     self.rollTimer = C_Timer.NewTimer(self.ROLL_DURATION, function()
         LootMaster:EndRolling()
     end)
+    self:ScheduleCountdownWarnings()
 
-    -- Update UI
-    if self.rollFrame and self.rollFrame:IsShown() then
-        self:RefreshRollFrame()
-    end
+    -- Update UI — always open/refresh the ML roll frame
+    self:ShowRollFrame()
 
     BRutus:Print("Loot announced: " .. itemLink .. " (" .. self.ROLL_DURATION .. "s)")
 end
@@ -526,7 +576,7 @@ function LootMaster:AutoCouncilAward(winner, itemLink, lootSlot, allCandidates)
 
     -- Announce in raid
     self:SafeSendChat(
-        string.format("{rt4} Wishlist Council: %s >> %s [%s] {rt4}", itemLink, winner.name, orderStr),
+        string.format("[Wishlist] %s vai para %s (%s) - aguardando confirmacao do ML", itemLink, winner.name, orderStr),
         "RAID_WARNING"
     )
 
@@ -551,7 +601,7 @@ function LootMaster:StartRestrictedRoll(tied, _allCandidates, itemLink, _lootSlo
 
     -- Announce in RAID_WARNING — only listed players should roll
     self:SafeSendChat(
-        string.format("{rt4} ROLL: %s {rt4}  |  Prioridade empatada [%s]: %s  |  /roll 1-100 MS  |  /roll 1-99 OS  |  %ds",
+        string.format("[ROLL] %s  -  Empate [%s]: %s  -  /roll 1-100 MS  -  /roll 1-99 OS  -  %ds",
             itemLink, orderStr, nameStr, self.ROLL_DURATION),
         "RAID_WARNING"
     )
@@ -569,6 +619,7 @@ function LootMaster:StartRestrictedRoll(tied, _allCandidates, itemLink, _lootSlo
     self.rollTimer = C_Timer.NewTimer(self.ROLL_DURATION, function()
         LootMaster:EndRolling()
     end)
+    self:ScheduleCountdownWarnings()
 
     -- Show roll tracker for ML
     self:ShowRollFrame()
@@ -811,7 +862,7 @@ function LootMaster:RegisterRoll(name, rollType, roll)
     if rollType == "MS" and minAtt > 0 and ctx.att25 < minAtt then
         rollType = "OS"
         self:SafeSendChat(string.format(
-            "[Loot] %s: MS downgraded to OS (attendance %d%% < required %d%%)",
+            "[Loot] %s: MS convertido para OS (presenca %d%% abaixo do minimo %d%%)",
             name, ctx.att25, minAtt), "RAID")
     end
 
@@ -879,10 +930,10 @@ function LootMaster:RegisterRoll(name, rollType, roll)
 
     -- Announce prio or wishlist position to raid
     if prioOrder then
-        self:SafeSendChat(string.format("[Loot] %s: %s [Prio Oficial #%d]",
+        self:SafeSendChat(string.format("[Loot] %s: %s (Prio Oficial #%d)",
             name, rollType, prioOrder), "RAID")
     elseif wishInfo then
-        self:SafeSendChat(string.format("[Loot] %s: %s [Wishlist #%d]",
+        self:SafeSendChat(string.format("[Loot] %s: %s (Wishlist #%d)",
             name, rollType, wishInfo.order), "RAID")
     end
 
@@ -927,6 +978,10 @@ function LootMaster:EndRolling()
         local aOrder = a.wishlist and a.wishlist.order or 999
         local bOrder = b.wishlist and b.wishlist.order or 999
         if aOrder ~= bOrder then return aOrder < bOrder end
+        -- Received tiebreaker: fewer items received this lockout wins
+        local aRecv = a.recvCount or 0
+        local bRecv = b.recvCount or 0
+        if aRecv ~= bRecv then return aRecv < bRecv end
         -- Attendance tiebreaker: higher 25-man attendance wins
         if BRutus.db.lootMaster.attTiebreaker and (a.att25 or 0) ~= (b.att25 or 0) then
             return (a.att25 or 0) > (b.att25 or 0)
@@ -947,10 +1002,10 @@ function LootMaster:EndRolling()
         elseif winner.wishlist then
             wishStr = string.format(" [Wishlist #%d]", winner.wishlist.order)
         end
-        self:SafeSendChat(string.format("{rt4} WINNER: %s (%s - %d)%s for %s",
+        self:SafeSendChat(string.format("[VENCEDOR] %s - %s (%d)%s - %s",
             winner.name, winner.rollType, winner.roll, wishStr, self.activeLoot.link), "RAID_WARNING")
     else
-        self:SafeSendChat("{rt4} No rolls received for " .. self.activeLoot.link, "RAID_WARNING")
+        self:SafeSendChat("[Roll] Nenhum roll recebido para " .. self.activeLoot.link, "RAID_WARNING")
     end
 
     -- Refresh UI
@@ -962,7 +1017,7 @@ end
 ----------------------------------------------------------------------
 -- Award loot to a player (Gargul-style two-path distribution)
 ----------------------------------------------------------------------
-function LootMaster:AwardLoot(playerName)
+function LootMaster:AwardLoot(playerName, silent)
     if not self.activeLoot then return end
     if not self:IsMasterLooter() then
         BRutus:Print("You are not the Master Looter.")
@@ -1014,8 +1069,10 @@ function LootMaster:AwardLoot(playerName)
     local payload = string.format("AWARD|%s|%d|%d|%s|%s", playerName, itemId, itemQuality, raidName, itemLink)
     self:SafeSendAddon("BRutusLM", payload, "RAID")
 
-    -- Announce
-    self:SafeSendChat(string.format("{rt4} %s awarded to %s", itemLink, playerName), "RAID")
+    -- Announce (skipped when silent=true, e.g. SendToDisenchanter already announced)
+    if not silent then
+        self:SafeSendChat(string.format("[Loot] %s entregue para %s", itemLink, playerName), "RAID")
+    end
 
     -- Save to LootMaster's own award log (for undo / ML reference)
     if not BRutus.db.lootMaster.awardHistory then
@@ -1055,6 +1112,7 @@ function LootMaster:AwardLoot(playerName)
         BRutus:Print(itemLink .. " awarded to |cff00ff00" .. playerName .. "|r - trade to deliver.")
     end
 
+    if self.activeLoot then self.activeLoot.delivered = true end
     self.activeLoot = nil
     self.rolls = {}
 end
@@ -1167,6 +1225,28 @@ function LootMaster:GetPendingTrades()
 end
 
 ----------------------------------------------------------------------
+-- Schedule RAID_WARNING countdown messages at key thresholds
+-- so the raid knows when time is about to run out.
+-- Only the ML sends these (called from DoNormalAnnounce/StartRestrictedRoll).
+----------------------------------------------------------------------
+function LootMaster:ScheduleCountdownWarnings()
+    local dur = self.ROLL_DURATION
+    local warnings = { 10, 5, 3, 2, 1 }
+    for _, t in ipairs(warnings) do
+        if dur > t then
+            local secs = t  -- capture for closure
+            C_Timer.After(dur - secs, function()
+                if LootMaster.activeLoot and not LootMaster.activeLoot.ended then
+                    LootMaster:SafeSendChat(
+                        "[Roll] " .. secs .. " segundo" .. (secs == 1 and "" or "s") .. "!",
+                        "RAID_WARNING")
+                end
+            end)
+        end
+    end
+end
+
+----------------------------------------------------------------------
 -- Cancel current rolling session
 ----------------------------------------------------------------------
 function LootMaster:CancelRolling()
@@ -1177,7 +1257,8 @@ function LootMaster:CancelRolling()
         self.rollTimer = nil
     end
     if self.activeLoot then
-        self:SafeSendChat("{rt4} Rolling cancelled for " .. self.activeLoot.link, "RAID")
+        self:SafeSendChat("[Loot] Roll cancelado: " .. self.activeLoot.link, "RAID")
+        self.activeLoot.delivered = true
     end
     self.activeLoot = nil
     self.rolls = {}
@@ -1201,17 +1282,114 @@ function LootMaster:SendMyRoll(rollType)
 end
 
 ----------------------------------------------------------------------
--- UI: Roll popup for raiders (non-ML)
+-- UI: Roll popup for raiders — shown on ANNOUNCE (BRutus ML) or
+-- START_LOOT_ROLL (native WoW group loot).
+-- Displays the item link, the local player's own prio/wishlist
+-- position, and the full priority list so everyone can see who
+-- has priority without having to ask.
 ----------------------------------------------------------------------
 function LootMaster:ShowRollPopup(itemLink, duration, itemId)
-    local C = BRutus.Colors
+    local C      = BRutus.Colors
+    local myName = UnitName("player")
 
     if self.rollPopup then
         self.rollPopup:Hide()
     end
 
+    ----------------------------------------------------------------
+    -- Build combined priority list: officer prios first, then wishlist
+    ----------------------------------------------------------------
+    local entries  = {}
+    local entrySet = {}  -- track names already added (deduplicate)
+
+    -- 1. Officer prios (from db.lootPrios)
+    if itemId and itemId > 0 and BRutus.db and BRutus.db.lootPrios then
+        local prioList = BRutus.db.lootPrios[itemId]
+        if prioList then
+            for idx, e in ipairs(prioList) do
+                local key = strlower(e.name or "")
+                if key ~= "" and not entrySet[key] then
+                    table.insert(entries, {
+                        name    = e.name,
+                        class   = e.class or "UNKNOWN",
+                        typeStr = "PRIO",
+                        typeCat = "prio",
+                        order   = idx,
+                    })
+                    entrySet[key] = true
+                end
+            end
+        end
+    end
+
+    -- 2. Wishlist entries (not already covered by an officer prio)
+    if itemId and itemId > 0 and BRutus.Wishlist then
+        local interest = BRutus.Wishlist:GetItemInterest(itemId)
+        if interest then
+            for _, e in ipairs(interest) do
+                local key = strlower(e.name or "")
+                if key ~= "" and not entrySet[key] then
+                    table.insert(entries, {
+                        name    = e.name,
+                        class   = e.class or "UNKNOWN",
+                        typeStr = "WISH",
+                        typeCat = "wishlist",
+                        order   = e.order or 999,
+                    })
+                    entrySet[key] = true
+                end
+            end
+        end
+    end
+
+    -- Annotate with in-group status and update class from live unit data
+    local inGroup    = {}
+    local numMembers = GetNumGroupMembers()
+    for i = 1, numMembers do
+        local unit = IsInRaid() and ("raid" .. i) or ("party" .. i)
+        local name = UnitName(unit)
+        if name then
+            inGroup[strlower(name)] = select(2, UnitClass(unit)) or "UNKNOWN"
+        end
+    end
+    -- Always include self (covers solo testing and the local player's row highlight)
+    inGroup[strlower(myName)] = select(2, UnitClass("player")) or "UNKNOWN"
+
+    for _, e in ipairs(entries) do
+        local key = strlower(e.name)
+        e.inRaid = inGroup[key] ~= nil
+        if inGroup[key] then
+            e.class = inGroup[key]  -- prefer live unit class over stored value
+        end
+    end
+
+    ----------------------------------------------------------------
+    -- Calculate frame dimensions
+    ----------------------------------------------------------------
+    local MAX_VISIBLE = 10
+    local numEntries  = #entries
+    local visCount    = math.min(numEntries, MAX_VISIBLE)
+    local ROW_H       = 20
+
+    -- list area: column-header row + entry rows + optional overflow label
+    local listArea
+    if numEntries > 0 then
+        listArea = 20 + visCount * ROW_H
+        if numEntries > MAX_VISIBLE then listArea = listArea + 16 end
+    else
+        listArea = 22  -- "no wishlist data" label
+    end
+
+    local FRAME_W = 360
+    local TOP_H   = 68   -- title + item link + status
+    local BTN_H   = 42   -- buttons + timer bar
+    local FRAME_H = math.max(120, TOP_H + listArea + BTN_H + 10)
+
+    ----------------------------------------------------------------
+    -- Main frame
+    ----------------------------------------------------------------
     local f = CreateFrame("Frame", "BRutusRollPopup", UIParent, "BackdropTemplate")
-    f:SetSize(320, 100)
+    f:SetSize(FRAME_W, FRAME_H)
     f:SetPoint("TOP", UIParent, "TOP", 0, -120)
     f:SetBackdrop({
         bgFile   = "Interface\\Buttons\\WHITE8x8",
@@ -1225,7 +1403,7 @@ function LootMaster:ShowRollPopup(itemLink, duration, itemId)
     f:EnableMouse(true)
     f:RegisterForDrag("LeftButton")
     f:SetScript("OnDragStart", function(self) self:StartMoving() end)
-    f:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
+    f:SetScript("OnDragStop",  function(self) self:StopMovingOrSizing() end)
 
     -- Title
     local title = f:CreateFontString(nil, "OVERLAY")
@@ -1240,31 +1418,28 @@ function LootMaster:ShowRollPopup(itemLink, duration, itemId)
     itemText:SetPoint("TOP", 0, -26)
     itemText:SetText(itemLink or "Unknown Item")
 
-    -- Wishlist / prio info
+    -- Player's own prio / wishlist status
     local tmbText = f:CreateFontString(nil, "OVERLAY")
     tmbText:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
-    tmbText:SetPoint("TOP", 0, -42)
+    tmbText:SetPoint("TOP", 0, -44)
     tmbText:SetTextColor(C.silver.r, C.silver.g, C.silver.b)
 
-    if itemId and itemId > 0 and BRutus.Wishlist then
-        local myName = UnitName("player")
-
-        -- Check officer prio first
-        local prioOrder = nil
+    if itemId and itemId > 0 then
+        local myPrioOrder = nil
         if BRutus.db and BRutus.db.lootPrios and BRutus.db.lootPrios[itemId] then
-            for idx, entry in ipairs(BRutus.db.lootPrios[itemId]) do
-                if strlower(entry.name or "") == strlower(myName or "") then
-                    prioOrder = idx
+            for idx, e in ipairs(BRutus.db.lootPrios[itemId]) do
+                if strlower(e.name or "") == strlower(myName) then
+                    myPrioOrder = idx
                     break
                 end
             end
         end
 
-        if prioOrder then
-            tmbText:SetText(string.format("|cffFFD700[PRIO OFICIAL #%d]|r", prioOrder))
+        if myPrioOrder then
+            tmbText:SetText(format("|cffFFD700[PRIO OFICIAL #%d]|r", myPrioOrder))
         else
-            local interest = BRutus.Wishlist:GetItemInterest(itemId)
-            local myEntry = nil
+            local interest = BRutus.Wishlist and BRutus.Wishlist:GetItemInterest(itemId)
+            local myEntry  = nil
             if interest then
                 for _, e in ipairs(interest) do
                     if strlower(e.name) == strlower(myName) then
@@ -1279,54 +1454,242 @@ function LootMaster:ShowRollPopup(itemLink, duration, itemId)
                 tmbText:SetText("|cff666666Not on your wishlist|r")
             end
         end
-    else
-        tmbText:SetText("")
     end
 
-    -- Buttons
+    ----------------------------------------------------------------
+    -- Priority list
+    ----------------------------------------------------------------
+    local listY = -(TOP_H)
+
+    -- Thin separator above list
+    local sep1 = f:CreateTexture(nil, "ARTWORK")
+    sep1:SetTexture("Interface\\Buttons\\WHITE8x8")
+    sep1:SetHeight(1)
+    sep1:SetPoint("TOPLEFT",  8, listY)
+    sep1:SetPoint("TOPRIGHT", -8, listY)
+    sep1:SetVertexColor(C.accent.r, C.accent.g, C.accent.b, 0.35)
+    listY = listY - 2
+
+    if numEntries > 0 then
+        -- Column headers
+        local function MakeHdr(lbl, xOff)
+            local h = f:CreateFontString(nil, "OVERLAY")
+            h:SetFont("Fonts\\FRIZQT__.TTF", 8, "OUTLINE")
+            h:SetPoint("TOPLEFT", xOff, listY - 2)
+            h:SetTextColor(0.5, 0.5, 0.5)
+            h:SetText(lbl)
+        end
+        MakeHdr("#",      12)
+        MakeHdr("TYPE",   26)
+        MakeHdr("ORD",    68)
+        MakeHdr("PLAYER", 98)
+        MakeHdr("ATT%",  234)
+        MakeHdr("RECV",  275)
+        MakeHdr("RAID",  310)
+        listY = listY - 18
+
+        -- Entry rows
+        for idx = 1, visCount do
+            local e    = entries[idx]
+            local isMe = strlower(e.name) == strlower(myName)
+
+            local row = CreateFrame("Frame", nil, f, "BackdropTemplate")
+            row:SetSize(FRAME_W - 16, ROW_H)
+            row:SetPoint("TOPLEFT", 8, listY)
+            row:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
+
+            if isMe then
+                row:SetBackdropColor(0.08, 0.22, 0.08, 0.9)
+            else
+                local bg   = (idx % 2 == 1) and C.row1 or C.row2
+                local bgA  = e.inRaid and (bg.a or 0.6) or ((bg.a or 0.6) * 0.4)
+                row:SetBackdropColor(bg.r, bg.g, bg.b, bgA)
+            end
+
+            -- # (index)
+            local idxT = row:CreateFontString(nil, "OVERLAY")
+            idxT:SetFont("Fonts\\FRIZQT__.TTF", 9, "OUTLINE")
+            idxT:SetPoint("LEFT", 4, 0)
+            idxT:SetTextColor(
+                e.inRaid and C.gold.r or 0.35,
+                e.inRaid and C.gold.g or 0.35,
+                e.inRaid and C.gold.b or 0.35)
+            idxT:SetText(idx)
+
+            -- TYPE (PRIO / WISH)
+            local typeT = row:CreateFontString(nil, "OVERLAY")
+            typeT:SetFont("Fonts\\FRIZQT__.TTF", 8, "OUTLINE")
+            typeT:SetPoint("LEFT", 18, 0)
+            local tc = e.typeCat == "prio" and C.accent or C.gold
+            typeT:SetTextColor(
+                e.inRaid and tc.r or tc.r * 0.5,
+                e.inRaid and tc.g or tc.g * 0.5,
+                e.inRaid and tc.b or tc.b * 0.5)
+            typeT:SetText(e.typeStr)
+
+            -- Order (#N)
+            local ordT = row:CreateFontString(nil, "OVERLAY")
+            ordT:SetFont("Fonts\\FRIZQT__.TTF", 8, "")
+            ordT:SetPoint("LEFT", 60, 0)
+            ordT:SetTextColor(
+                e.inRaid and 0.65 or 0.3,
+                e.inRaid and 0.65 or 0.3,
+                e.inRaid and 0.65 or 0.3)
+            ordT:SetText("#" .. e.order)
+
+            -- Name (class-colored when in group / is self)
+            local nameT = row:CreateFontString(nil, "OVERLAY")
+            nameT:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
+            nameT:SetPoint("LEFT", 92, 0)
+            nameT:SetWidth(134)
+            if e.inRaid or isMe then
+                local cr, cg, cb = BRutus:GetClassColor(e.class)
+                nameT:SetTextColor(cr, cg, cb)
+            else
+                nameT:SetTextColor(0.4, 0.4, 0.4)
+            end
+            nameT:SetText(e.name)
+
+            -- ATT% (25-man attendance)
+            local attCtx = self:GetPlayerContext(e.name)
+            local attT   = row:CreateFontString(nil, "OVERLAY")
+            attT:SetFont("Fonts\\FRIZQT__.TTF", 9, "OUTLINE")
+            attT:SetPoint("LEFT", 228, 0)
+            attT:SetWidth(40)
+            attT:SetJustifyH("CENTER")
+            if attCtx.att25 >= 60 then
+                attT:SetTextColor(0.3, 1.0, 0.3)
+            elseif attCtx.att25 >= 40 then
+                attT:SetTextColor(1.0, 1.0, 0.3)
+            else
+                attT:SetTextColor(1.0, 0.3, 0.3)
+            end
+            attT:SetText(attCtx.att25 .. "%")
+
+            -- RECV (items received this lockout)
+            local recvT = row:CreateFontString(nil, "OVERLAY")
+            recvT:SetFont("Fonts\\FRIZQT__.TTF", 9, "OUTLINE")
+            recvT:SetPoint("LEFT", 270, 0)
+            recvT:SetWidth(32)
+            recvT:SetJustifyH("CENTER")
+            if attCtx.recvThisLockout == 0 then
+                recvT:SetTextColor(0.4, 0.4, 0.4)
+            elseif attCtx.recvThisLockout == 1 then
+                recvT:SetTextColor(1.0, 1.0, 0.3)
+            else
+                recvT:SetTextColor(1.0, 0.3, 0.3)
+            end
+            recvT:SetText(tostring(attCtx.recvThisLockout))
+
+            -- IN RAID indicator
+            local raidT = row:CreateFontString(nil, "OVERLAY")
+            raidT:SetFont("Fonts\\FRIZQT__.TTF", 9, "OUTLINE")
+            raidT:SetPoint("LEFT", 306, 0)
+            if e.inRaid then
+                raidT:SetTextColor(0.3, 1.0, 0.3)
+                raidT:SetText("YES")
+            else
+                raidT:SetTextColor(0.4, 0.4, 0.4)
+                raidT:SetText("-")
+            end
+
+            listY = listY - ROW_H
+        end
+
+        -- Overflow label when list is clipped
+        if numEntries > MAX_VISIBLE then
+            local moreT = f:CreateFontString(nil, "OVERLAY")
+            moreT:SetFont("Fonts\\FRIZQT__.TTF", 9, "")
+            moreT:SetPoint("TOPLEFT", 12, listY - 2)
+            moreT:SetTextColor(0.5, 0.5, 0.5)
+            moreT:SetText(format("+ %d more interested", numEntries - MAX_VISIBLE))
+        end
+    else
+        -- No wishlist/prio data for this item
+        local noDataT = f:CreateFontString(nil, "OVERLAY")
+        noDataT:SetFont("Fonts\\FRIZQT__.TTF", 9, "")
+        noDataT:SetPoint("TOPLEFT", 12, listY - 4)
+        noDataT:SetTextColor(0.5, 0.5, 0.5)
+        noDataT:SetText("Nenhum dado de wishlist para este item.")
+    end
+
+    ----------------------------------------------------------------
+    -- Roll buttons (MS / OS / Pass)
+    ----------------------------------------------------------------
     local UI = BRutus.UI
-    local msBtn = UI:CreateButton(f, "MS", 80, 26)
-    msBtn:SetPoint("BOTTOMLEFT", 15, 10)
+    local msBtn = UI:CreateButton(f, "MS", 90, 26)
+    msBtn:SetPoint("BOTTOMLEFT", 15, 12)
     msBtn:SetBackdropColor(0.0, 0.4, 0.0, 0.6)
     msBtn:SetScript("OnClick", function()
-        RandomRoll(1, 100)  -- MS = /roll 1-100  (captured by ML via CHAT_MSG_SYSTEM)
+        RandomRoll(1, 100)
         f:Hide()
         BRutus:Print("Rolled |cff00ff00MS|r on " .. (itemLink or "item") .. " — /roll 1-100")
     end)
 
-    local osBtn = UI:CreateButton(f, "OS", 80, 26)
-    osBtn:SetPoint("BOTTOM", 0, 10)
+    local osBtn = UI:CreateButton(f, "OS", 90, 26)
+    osBtn:SetPoint("BOTTOM", 0, 12)
     osBtn:SetBackdropColor(0.3, 0.3, 0.0, 0.6)
     osBtn:SetScript("OnClick", function()
-        RandomRoll(1, 99)   -- OS = /roll 1-99
+        RandomRoll(1, 99)
         f:Hide()
         BRutus:Print("Rolled |cffFFFF00OS|r on " .. (itemLink or "item") .. " — /roll 1-99")
     end)
 
-    local passBtn = UI:CreateButton(f, "Pass", 80, 26)
-    passBtn:SetPoint("BOTTOMRIGHT", -15, 10)
+    local passBtn = UI:CreateButton(f, "Pass", 90, 26)
+    passBtn:SetPoint("BOTTOMRIGHT", -15, 12)
     passBtn:SetBackdropColor(0.4, 0.0, 0.0, 0.6)
     passBtn:SetScript("OnClick", function()
-        f:Hide()  -- Just close — no roll needed to pass
+        f:Hide()
     end)
 
-    -- Timer bar
+    ----------------------------------------------------------------
+    -- Timer countdown bar + 5-second warning
+    ----------------------------------------------------------------
     local timerBar = CreateFrame("StatusBar", nil, f)
-    timerBar:SetSize(290, 4)
-    timerBar:SetPoint("BOTTOM", 0, 5)
+    timerBar:SetSize(FRAME_W - 20, 4)
+    timerBar:SetPoint("BOTTOM", 0, 6)
     timerBar:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
     timerBar:SetStatusBarColor(C.accent.r, C.accent.g, C.accent.b, 0.8)
     timerBar:SetMinMaxValues(0, duration)
     timerBar:SetValue(duration)
 
-    local elapsed = 0
+    -- Warning label (hidden until last 5s)
+    local warnText = f:CreateFontString(nil, "OVERLAY")
+    warnText:SetFont("Fonts\\FRIZQT__.TTF", 13, "OUTLINE")
+    warnText:SetPoint("BOTTOM", 0, 14)
+    warnText:SetTextColor(1.0, 0.2, 0.2)
+    warnText:Hide()
+
+    local elapsed     = 0
+    local warnFired   = false
+    local warnFlash   = 0
     local ticker = C_Timer.NewTicker(0.1, function()
-        elapsed = elapsed + 0.1
+        elapsed   = elapsed + 0.1
         local remaining = duration - elapsed
         if remaining <= 0 then
             f:Hide()
-        else
-            timerBar:SetValue(remaining)
+            return
+        end
+        timerBar:SetValue(remaining)
+
+        -- Switch bar to red in last 5s
+        if remaining <= 5 then
+            timerBar:SetStatusBarColor(1.0, 0.15, 0.15, 0.9)
+
+            -- Play sound once when we cross 5s
+            if not warnFired then
+                warnFired = true
+                PlaySound(SOUNDKIT and SOUNDKIT.IG_ABILITY_ICON_DROP or 1304)
+            end
+
+            -- Flash "X segundos!" label
+            warnFlash = warnFlash + 0.1
+            local secs = math.ceil(remaining)
+            warnText:SetText(secs .. "s!")
+            warnText:Show()
+            -- Pulse alpha: 0.5s cycle
+            local alpha = 0.6 + 0.4 * math.abs(math.sin(warnFlash * math.pi * 2))
+            warnText:SetAlpha(alpha)
         end
     end)
 
@@ -1634,7 +1997,7 @@ function LootMaster:ShowLootFrame(items)
     -- Column headers
     local prioHdr = CreateFrame("Frame", nil, f, "BackdropTemplate")
     prioHdr:SetSize(rightW, 16)
-    prioHdr:SetPoint("TOPLEFT", RIGHT_X, -48)
+    prioHdr:SetPoint("TOPLEFT", RIGHT_X, -52)
     prioHdr:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
     prioHdr:SetBackdropColor(0.04, 0.04, 0.08, 1)
     local function PH(txt, x)
@@ -1648,7 +2011,7 @@ function LootMaster:ShowLootFrame(items)
 
     -- Priority scroll area
     local prioContainer = CreateFrame("Frame", nil, f)
-    prioContainer:SetPoint("TOPLEFT",     RIGHT_X, -66)
+    prioContainer:SetPoint("TOPLEFT",     RIGHT_X, -70)
     prioContainer:SetPoint("BOTTOMRIGHT", -8,       42)
 
     local prioScroll = CreateFrame("ScrollFrame", "BRutusMLPrioScroll", prioContainer, "UIPanelScrollFrameTemplate")
@@ -2018,7 +2381,7 @@ function LootMaster:ShowLootFrame(items)
     ----------------------------------------------------------------
     -- Left panel: one button per loot item
     ----------------------------------------------------------------
-    local leftYOff = 34
+    local leftYOff = 46
     for _, item in ipairs(items) do
         local btn = CreateFrame("Button", nil, f, "BackdropTemplate")
         btn:SetSize(LEFT_W - 10, 32)
@@ -2054,7 +2417,7 @@ function LootMaster:ShowLootFrame(items)
         local capturedItem = item
         btn:SetScript("OnEnter", function(self)
             self:SetBackdropColor(C.rowHover.r, C.rowHover.g, C.rowHover.b, C.rowHover.a)
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT")
             GameTooltip:SetHyperlink(capturedItem.link)
             GameTooltip:Show()
         end)
@@ -2492,16 +2855,22 @@ end
 -- Disenchanter: designated player who receives unwanted items to DE
 ----------------------------------------------------------------------
 function LootMaster:GetDisenchanter()
+    if BRutus.db and BRutus.db.lootMaster then
+        return BRutus.db.lootMaster.disenchanter or ""
+    end
     return self.disenchanter or ""
 end
 
 function LootMaster:SetDisenchanter(name)
     self.disenchanter = name or ""
+    if BRutus.db and BRutus.db.lootMaster then
+        BRutus.db.lootMaster.disenchanter = self.disenchanter
+    end
 end
 
 -- Award the active item (or the provided item) to the disenchanter.
 -- Called when ML clicks "Send to DE" from any loot UI.
-function LootMaster:SendToDisenchanter(itemLink, lootSlot, itemId)
+function LootMaster:SendToDisenchanter(itemLink, lootSlot, itemId, reason)
     local deName = self:GetDisenchanter()
     if not deName or deName == "" then
         BRutus:Print("|cffFF4444Nenhum disenchanter definido.|r Configure nas opções do Loot Master.")
@@ -2513,10 +2882,57 @@ function LootMaster:SendToDisenchanter(itemLink, lootSlot, itemId)
         self:SetActiveLoot(itemLink or "", lootSlot, itemId or 0)
     end
 
-    self:SafeSendChat(
-        string.format("{rt7} %s — ninguém quis. Enviando para Disenchant: |cff00ff00%s|r",
-            itemLink or "item", deName),
-        "RAID")
+    local msg
+    if reason == "norolls" then
+        msg = string.format("[Loot] %s - ninguem rolou. Enviando para Disenchant: %s",
+            itemLink or "item", deName)
+    else
+        msg = string.format("[Loot] %s entregue para Disenchant (%s)",
+            itemLink or "item", deName)
+    end
+    self:SafeSendChat(msg, "RAID")
 
-    self:AwardLoot(deName)
+    self:AwardLoot(deName, true)  -- silent: message already sent above
+end
+
+----------------------------------------------------------------------
+-- Roll from Bag — start a full BRutus roll for an item already in
+-- the ML's bags (e.g. items picked up to distribute later).
+-- Awards always go through the trade path (QueueForTrade) because
+-- there is no ML loot window for bag items.
+----------------------------------------------------------------------
+function LootMaster:RollFromBag(bag, slot)
+    if not self:IsMasterLooter() then
+        BRutus:Print("|cffFF4444[LootMaster]|r Apenas o Master Looter pode usar esta função.")
+        return
+    end
+
+    -- Block if a roll session is already in progress
+    if self.activeLoot and not self.activeLoot.delivered then
+        BRutus:Print("|cffFF9900[LootMaster]|r Roll em andamento: " .. (self.activeLoot.link or "?"))
+        return
+    end
+
+    -- Get item link from bag slot
+    local itemLink
+    if C_Container and C_Container.GetContainerItemLink then
+        itemLink = C_Container.GetContainerItemLink(bag, slot)
+    elseif GetContainerItemLink then
+        itemLink = GetContainerItemLink(bag, slot)  -- luacheck: ignore
+    end
+
+    if not itemLink then return end
+
+    -- Only Rare+ (quality >= 3); skip if info not cached yet
+    local _, _, quality = GetItemInfo(itemLink)
+    if quality and quality < 3 then
+        BRutus:Print("|cffFF9900[LootMaster]|r Apenas itens Raro (azul) ou superior podem ser rolados.")
+        return
+    end
+
+    -- Force trade-delivery path (no loot window is open for bag items)
+    self.lootWindowOpen = false
+
+    BRutus:Print("|cff00ff00[LootMaster]|r Iniciando roll da bag: " .. itemLink)
+    self:AnnounceItem(itemLink, nil)
 end

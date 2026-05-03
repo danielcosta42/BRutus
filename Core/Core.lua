@@ -1,0 +1,422 @@
+----------------------------------------------------------------------
+-- BRutus Guild Manager - Core
+-- Global namespace, database bootstrap, event frame, lifecycle.
+----------------------------------------------------------------------
+local ADDON_NAME, ns = ...
+
+-- Global addon table
+BRutus = {}
+BRutus.ns = ns
+
+-- Version
+BRutus.VERSION      = "1.0.0"
+BRutus.COMM_VERSION = 1
+BRutus.PREFIX       = "BRutus"
+
+----------------------------------------------------------------------
+-- Session state (runtime-only, never persisted)
+----------------------------------------------------------------------
+BRutus.State = {
+    comm        = { lastBroadcast = 0, pendingMessages = {} },
+    lootMaster  = {},
+    recruitment = {},
+    raid        = {},
+    consumables = {},
+    raidCD      = { state = {}, members = {} },
+}
+
+----------------------------------------------------------------------
+-- Database defaults
+----------------------------------------------------------------------
+local DB_DEFAULTS = {
+    version = 1,
+    members = {},    -- [name-realm] = { gear, professions, attunements, ... }
+    settings = {
+        sortBy = "level",
+        sortAsc = false,
+        showOffline = true,
+        minimap = { hide = false },
+        officerMaxRank = 2,  -- rank indexes 0..officerMaxRank are considered officers
+        modules = {
+            raidTracker = true,
+            lootTracker = true,
+            lootMaster = true,
+            consumableChecker = true,
+            recruitment = true,
+            trialTracker = true,
+            officerNotes = true,
+            commSystem = true,
+        },
+    },
+    myData = {},
+    lastSync = 0,
+    guildWishlists = {},  -- [lowerName] = { name, class, wishlist = {} }
+    lootPrios = {},       -- [itemId(num)] = { {name, class, order}, ... } officer-set priorities
+    raidTracker = {
+        sessions = {},
+        attendance = {},
+        currentGroupTag = "",
+        deletedSessions = {},  -- [sessionID] = true; permanent tombstone set
+    },
+    lootHistory = {},
+    lootMaster = {
+        rollDuration = 30,
+        autoAnnounce = true,
+        wishlistOnlyMode = false,
+        awardHistory = {},
+        disenchanter = "",
+    },
+    officerNotes = {},
+    trials = {},
+    altLinks = {},  -- [altKey] = mainKey  (officer-maintained, for account-wide attunement propagation)
+    consumableChecks = { lastResults = {} },
+    wishlists = {},   -- [charKey] = [{ itemId, itemLink, order, isOffspec }] — per-character wishlists
+}
+
+----------------------------------------------------------------------
+-- Event frame
+----------------------------------------------------------------------
+local eventFrame = CreateFrame("Frame")
+eventFrame:RegisterEvent("ADDON_LOADED")
+eventFrame:RegisterEvent("PLAYER_LOGIN")
+eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+eventFrame:RegisterEvent("GUILD_ROSTER_UPDATE")
+eventFrame:RegisterEvent("PLAYER_GUILD_UPDATE")
+
+eventFrame:SetScript("OnEvent", function(self, event, ...)
+    if event == "ADDON_LOADED" then
+        local addon = ...
+        if addon == ADDON_NAME then
+            BRutus:Initialize()
+        end
+    elseif event == "PLAYER_LOGIN" then
+        BRutus:OnLogin()
+    elseif event == "PLAYER_ENTERING_WORLD" then
+        local isInitialLogin, isReloadingUi = ...
+        BRutus:OnEnterWorld(isInitialLogin, isReloadingUi)
+    elseif event == "GUILD_ROSTER_UPDATE" then
+        BRutus:OnGuildRosterUpdate()
+    elseif event == "PLAYER_GUILD_UPDATE" then
+        BRutus:OnGuildRosterUpdate()
+    end
+end)
+
+----------------------------------------------------------------------
+-- Initialization
+----------------------------------------------------------------------
+function BRutus:Initialize()
+    -- Ensure global container exists
+    if not BRutusDB then
+        BRutusDB = {}
+    end
+
+    -- Register addon prefix for communication
+    if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then
+        C_ChatInfo.RegisterAddonMessagePrefix(self.PREFIX)
+    end
+
+    self:Print("v" .. self.VERSION .. " loaded. Type |cffFFD700/brutus|r to open.")
+end
+
+----------------------------------------------------------------------
+-- Per-guild DB resolution
+----------------------------------------------------------------------
+function BRutus:ResolveGuildDB()
+    if not IsInGuild() then
+        self.db = nil
+        self.guildKey = nil
+        return false
+    end
+
+    local guildName = GetGuildInfo("player")
+    if not guildName then return false end
+
+    local realmName = GetRealmName() or "Unknown"
+    local guildKey = guildName .. "-" .. realmName
+
+    -- Already resolved to this guild
+    if self.guildKey == guildKey and self.db then return true end
+
+    -- Migration from flat structure (pre-guild-keyed DB)
+    if not BRutusDB._dbVersion then
+        if BRutusDB.version or BRutusDB.members or BRutusDB.settings then
+            local oldData = {}
+            for k, v in pairs(BRutusDB) do
+                oldData[k] = v
+            end
+            wipe(BRutusDB)
+            BRutusDB[guildKey] = oldData
+        end
+        BRutusDB._dbVersion = 2
+    end
+
+    if not BRutusDB[guildKey] then
+        BRutusDB[guildKey] = {}
+    end
+
+    -- Apply defaults
+    local guildDB = BRutusDB[guildKey]
+    for k, v in pairs(DB_DEFAULTS) do
+        if guildDB[k] == nil then
+            if type(v) == "table" then
+                guildDB[k] = self:DeepCopy(v)
+            else
+                guildDB[k] = v
+            end
+        end
+    end
+
+    self.db = guildDB
+    self.guildKey = guildKey
+    return true
+end
+
+function BRutus:OnLogin()
+    if not IsInGuild() then
+        self:Print("|cff888888Not in a guild - addon inactive.|r")
+        return
+    end
+
+    -- Guild info may not be available immediately; retry a few times
+    if not self:ResolveGuildDB() then
+        local attempts = 0
+        local function tryResolve()
+            attempts = attempts + 1
+            if BRutus:ResolveGuildDB() then
+                BRutus:InitModules()
+                return
+            end
+            if attempts < 5 then
+                C_Timer.After(2, tryResolve)
+            else
+                BRutus:Print("|cffFF4444Could not load guild info. Try /reload.|r")
+            end
+        end
+        C_Timer.After(2, tryResolve)
+        return
+    end
+
+    self:InitModules()
+end
+
+function BRutus:InitModules()
+    -- Module enabled helper
+    local function modEnabled(key)
+        if not self.db or not self.db.settings or not self.db.settings.modules then return true end
+        return self.db.settings.modules[key] ~= false
+    end
+
+    -- Initialize subsystems (always-on)
+    if BRutus.DataCollector then
+        BRutus.DataCollector:Initialize()
+    end
+    if BRutus.AttunementTracker then
+        BRutus.AttunementTracker:Initialize()
+    end
+    if BRutus.CommSystem and modEnabled("commSystem") then
+        BRutus.CommSystem:Initialize()
+    end
+    if BRutus.Wishlist then
+        BRutus.Wishlist:Initialize()
+    end
+    if BRutus.RaidTracker and modEnabled("raidTracker") then
+        BRutus.RaidTracker:Initialize()
+    end
+    if BRutus.LootTracker and modEnabled("lootTracker") then
+        BRutus.LootTracker:Initialize()
+    end
+    if BRutus.LootMaster and modEnabled("lootMaster") then
+        BRutus.LootMaster:Initialize()
+    end
+    if BRutus.ConsumableChecker and modEnabled("consumableChecker") then
+        BRutus.ConsumableChecker:Initialize()
+    end
+    if BRutus.SpecChecker then
+        BRutus.SpecChecker:Initialize()
+    end
+    if BRutus.RecipeTracker then
+        BRutus.RecipeTracker:Initialize()
+    end
+
+    -- Officer-only modules: defer init until guild info is available
+    C_Timer.After(5, function()
+        if not BRutus:IsOfficer() then return end
+
+        if BRutus.Recruitment and modEnabled("recruitment") then
+            BRutus.Recruitment:Initialize()
+        end
+        if BRutus.OfficerNotes and modEnabled("officerNotes") then
+            BRutus.OfficerNotes:Initialize()
+        end
+        if BRutus.TrialTracker and modEnabled("trialTracker") then
+            BRutus.TrialTracker:Initialize()
+            BRutus.TrialTracker:CheckExpired()
+        end
+    end)
+
+    -- Hook chat player links for guild invite
+    BRutus:HookChatInvite()
+
+    -- Request guild roster
+    if IsInGuild() then
+        C_GuildInfo.GuildRoster()
+    end
+
+    -- Hook into default guild frame so BRutus opens instead
+    BRutus:HookGuildFrame()
+end
+
+function BRutus:OnEnterWorld(isInitialLogin, isReloadingUi)
+    if not self.db or not self.guildKey then return end
+
+    -- Only run the full startup sequence on the initial login or UI reload.
+    -- PLAYER_ENTERING_WORLD also fires on every zone/instance transition —
+    -- we don't want to re-collect, re-broadcast, or re-check professions then.
+    if not isInitialLogin and not isReloadingUi then return end
+
+    -- Collect own data after a short delay
+    C_Timer.After(3, function()
+        if BRutus.DataCollector then
+            BRutus.DataCollector:CollectMyData()
+        end
+        if BRutus.AttunementTracker then
+            BRutus.AttunementTracker:ScanAttunements()
+        end
+        -- Broadcast our data to guildies
+        C_Timer.After(2, function()
+            if BRutus.CommSystem then
+                BRutus.CommSystem:BroadcastMyData()
+            end
+        end)
+        -- Broadcast our wishlist so guildies can see our priorities (officer-only while in testing)
+        if BRutus:IsOfficer() then
+            C_Timer.After(5, function()
+                if BRutus.Wishlist then
+                    BRutus.Wishlist:BroadcastMyWishlist()
+                end
+            end)
+        end
+        -- Check profession freshness after data is collected
+        C_Timer.After(4, function()
+            BRutus:CheckProfessionFreshness()
+        end)
+    end)
+end
+
+function BRutus:OnGuildRosterUpdate()
+    if BRutus.RosterFrame and BRutus.RosterFrame:IsShown() then
+        BRutus.RosterFrame:RefreshRoster()
+    end
+end
+
+----------------------------------------------------------------------
+-- Hook into the default Blizzard guild frame
+----------------------------------------------------------------------
+function BRutus:HookGuildFrame()
+    -- Replace ToggleGuildFrame (called by J keybind and guild micro button)
+    if ToggleGuildFrame then
+        local originalToggleGuildFrame = ToggleGuildFrame
+        ToggleGuildFrame = function()
+            if IsInGuild() then
+                BRutus:ToggleRoster()
+            else
+                originalToggleGuildFrame()
+            end
+        end
+    end
+
+    -- Also hook ToggleFriendsFrame for guild tab (tab 3)
+    if ToggleFriendsFrame then
+        local originalToggleFriendsFrame = ToggleFriendsFrame
+        ToggleFriendsFrame = function(tabNumber, ...)
+            if tabNumber == 3 and IsInGuild() then
+                BRutus:ToggleRoster()
+                return
+            end
+            return originalToggleFriendsFrame(tabNumber, ...)
+        end
+    end
+end
+
+----------------------------------------------------------------------
+-- Toggle main roster window
+----------------------------------------------------------------------
+function BRutus:ToggleRoster()
+    if not IsInGuild() or not self.db then
+        self:Print("|cff888888Not in a guild \226\128\148 addon inactive.|r")
+        return
+    end
+    if not self.RosterFrame then
+        self.RosterFrame = BRutus.CreateRosterFrame()
+    end
+    if self.RosterFrame:IsShown() then
+        self.RosterFrame:Hide()
+    else
+        if IsInGuild() then
+            C_GuildInfo.GuildRoster()
+        end
+        self.RosterFrame:UpdateTabVisibility()
+        -- Reset to roster if current tab is officer-only and player isn't officer
+        local currentTab = self.RosterFrame.activeTab or "roster"
+        for _, tab in ipairs(self.RosterFrame.tabs) do
+            if tab.key == currentTab and tab.officerOnly and not self:IsOfficer() then
+                currentTab = "roster"
+                break
+            end
+        end
+        self.RosterFrame:SetActiveTab(currentTab)
+        self.RosterFrame:Show()
+        self.RosterFrame:RefreshRoster()
+    end
+end
+
+----------------------------------------------------------------------
+-- Utility — print
+----------------------------------------------------------------------
+function BRutus:Print(msg)
+    DEFAULT_CHAT_FRAME:AddMessage("|cffFFD700[BRutus]|r " .. tostring(msg))
+end
+
+----------------------------------------------------------------------
+-- Permission checks
+----------------------------------------------------------------------
+function BRutus:IsOfficer()
+    if not IsInGuild() then return false end
+    local _, _, rankIndex = GetGuildInfo("player")
+    if not rankIndex then return false end
+    local maxRank = (self.db and self.db.settings and self.db.settings.officerMaxRank) or 2
+    return rankIndex <= maxRank
+end
+
+-- Check whether a named player (may include realm, e.g. "Name-Realm") is an officer
+-- by scanning the guild roster. Used to validate incoming officer-only messages.
+function BRutus:IsOfficerByName(fullName)
+    if not IsInGuild() or not fullName then return false end
+    local maxRank = (self.db and self.db.settings and self.db.settings.officerMaxRank) or 2
+    -- Normalise: strip realm if present
+    local shortName = fullName:match("^([^-]+)") or fullName
+    local numMembers = GetNumGuildMembers() or 0
+    for i = 1, numMembers do
+        local name, _, rankIndex = GetGuildRosterInfo(i)
+        if name then
+            local memberShort = name:match("^([^-]+)") or name
+            if memberShort == shortName and rankIndex and rankIndex <= maxRank then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+----------------------------------------------------------------------
+-- Config accessors (Rule 8 — never read db.settings.* directly from UI)
+----------------------------------------------------------------------
+function BRutus:GetSetting(key)
+    return self.db and self.db.settings and self.db.settings[key]
+end
+
+function BRutus:SetSetting(key, value)
+    if self.db and self.db.settings then
+        self.db.settings[key] = value
+    end
+end
