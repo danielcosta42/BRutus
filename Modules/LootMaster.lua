@@ -181,52 +181,57 @@ function LootMaster:GetPlayerContext(playerName)
 end
 
 ----------------------------------------------------------------------
--- Check if player is the loot manager
--- Priority: WoW IsMasterLooter() > GetLootMethod > C_PartyInfo > raid rank
+-- Check if the local player is the designated Master Looter.
+--
+-- Rules (mirrors Gargul's approach):
+--   1. Must be in a group (party or raid) — never true when solo.
+--   2. Loot method must be "master" AND this player must be the ML.
+--
+-- The native IsMasterLooter() already encodes both conditions:
+--   it returns true only when in a group, loot is set to master, and
+--   this player is the chosen looter.  All fallbacks must obey the
+--   same contract; none return true for a solo player or a leader
+--   whose group uses any other loot method.
 ----------------------------------------------------------------------
 function LootMaster:IsMasterLooter()
-    -- Test mode: always consider player as ML
+    -- Test mode: bypass all checks for solo testing
     if self.testMode then return true end
 
-    -- 1. WoW built-in IsMasterLooter() (exists in most clients)
+    -- Must be in a group — never activate in open world
+    if not IsInGroup() then return false end
+
+    -- 1. Native WoW API (most reliable; works on TBC Anniversary)
     if IsMasterLooter and IsMasterLooter() then
         return true
     end
 
-    -- 2. Legacy GetLootMethod API
+    -- 2. GetLootMethod fallback (Classic/TBC):
+    --    partyID == 0  → local player is the master looter in a party
+    --    masterLooterRaidID == local raid index → player is ML in a raid
     if GetLootMethod then
-        local method, partyID = GetLootMethod()
-        if method == "master" and partyID == 0 then return true end
-    end
-
-    -- 3. C_PartyInfo shim (Retail / Anniversary)
-    if C_PartyInfo and C_PartyInfo.GetLootMethod then
-        local method = C_PartyInfo.GetLootMethod()
-        -- method 2 = master loot
-        if method == 2 then
-            -- Check if we're the ML via IsMasterLooter or raid info
-            if IsMasterLooter and IsMasterLooter() then return true end
-        end
-    end
-
-    -- 4. Fallback: raid leader (assistants cannot start rolls)
-    if IsInRaid() then
-        local myName = UnitName("player")
-        for i = 1, GetNumGroupMembers() do
-            local name, rank = GetRaidRosterInfo(i)
-            if name and name == myName then
-                return rank == 2
+        local method, masterLootPartyID, masterLooterRaidID = GetLootMethod()
+        if method == "master" then
+            -- Party case: partyID 0 means this player
+            if masterLootPartyID == 0 then return true end
+            -- Raid case: compare against local player's raid index
+            if masterLooterRaidID and IsInRaid() then
+                local myName = UnitName("player")
+                local name = GetRaidRosterInfo(masterLooterRaidID)
+                if name and name == myName then return true end
             end
         end
     end
 
-    -- 5. Party leader in a 5-man group
-    if IsInGroup() and not IsInRaid() then
-        if UnitIsGroupLeader("player") then return true end
+    -- 3. C_PartyInfo shim (Anniversary / Retail fallback)
+    if C_PartyInfo and C_PartyInfo.GetLootMethod then
+        local method, masterLooterRaidID = C_PartyInfo.GetLootMethod()
+        -- method 2 = master loot in the C_PartyInfo enum
+        if method == 2 and masterLooterRaidID then
+            local myName = UnitName("player")
+            local name = GetRaidRosterInfo(masterLooterRaidID)
+            if name and name == myName then return true end
+        end
     end
-
-    -- 6. Solo: no group at all — player controls their own loot
-    if not IsInGroup() then return true end
 
     return false
 end
@@ -308,8 +313,9 @@ end
 -- Loot window events
 ----------------------------------------------------------------------
 function LootMaster:OnLootOpened()
-    -- ML distribution is only meaningful in a raid.
-    if not IsInRaid() and not self.testMode then return end
+    -- ML distribution only works in a group (party or raid).
+    -- Never activate in open world (solo).
+    if not IsInGroup() and not self.testMode then return end
     if not self:IsMasterLooter() then return end
 
     self.isMLSession = true
