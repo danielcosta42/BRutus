@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.42.0] - 2026-05-04
+
+### Added
+- enhance Master Looter checks for group and raid scenarios
+
+
 ## [1.41.0] - 2026-05-03
 
 ### Added
