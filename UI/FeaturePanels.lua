@@ -1090,7 +1090,9 @@ function BRutus:RefreshSettingsPanel(content)
         cb:SetPoint("LEFT", 8, 0)
         cb.checkbox:SetChecked(mods[mod.key] ~= false)
         cb.checkbox.onChanged = function(_, checked)
-            mods[mod.key] = checked
+            -- GetChecked() returns true or nil (never false) in WoW TBC.
+            -- Explicitly store false so modEnabled() sees ~= false correctly.
+            mods[mod.key] = checked and true or false
             if checked then
                 BRutus:Print(mod.label .. " |cff00ff00enabled|r. Reload UI to apply.")
             else
