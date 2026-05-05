@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.42.1] - 2026-05-05
+
+### Fixed
+- correctly handle checkbox state in settings panel
+
+
 ## [1.42.0] - 2026-05-04
 
 ### Added
